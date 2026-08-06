@@ -319,20 +319,58 @@ impl QmpClient {
 }
 
 /// 文本 → (QKeyCode, 是否需要 shift)。
+/// 覆盖完整美式键盘布局的可见 ASCII 字符；非 ASCII 字符跳过。
 pub fn text_to_key_events(text: &str) -> Vec<(String, bool)> {
     let mut out = Vec::new();
     for c in text.chars() {
         let entry = match c {
             'a'..='z' => (c.to_string(), false),
             'A'..='Z' => (c.to_ascii_lowercase().to_string(), true),
-            '0'..='9' => (c.to_string(), false),
+            '0' => ("0".into(), false),
+            '1' => ("1".into(), false),
+            '2' => ("2".into(), false),
+            '3' => ("3".into(), false),
+            '4' => ("4".into(), false),
+            '5' => ("5".into(), false),
+            '6' => ("6".into(), false),
+            '7' => ("7".into(), false),
+            '8' => ("8".into(), false),
+            '9' => ("9".into(), false),
+            '!' => ("1".into(), true),
+            '@' => ("2".into(), true),
+            '#' => ("3".into(), true),
+            '$' => ("4".into(), true),
+            '%' => ("5".into(), true),
+            '^' => ("6".into(), true),
+            '&' => ("7".into(), true),
+            '*' => ("8".into(), true),
+            '(' => ("9".into(), true),
+            ')' => ("0".into(), true),
             ' ' => ("spc".into(), false),
             '-' => ("minus".into(), false),
             '_' => ("minus".into(), true),
-            '.' => ("dot".into(), false),
-            '/' => ("slash".into(), false),
+            '=' => ("equal".into(), false),
+            '+' => ("equal".into(), true),
+            '[' => ("bracket_left".into(), false),
+            ']' => ("bracket_right".into(), false),
+            '{' => ("bracket_left".into(), true),
+            '}' => ("bracket_right".into(), true),
+            '\\' => ("backslash".into(), false),
+            '|' => ("backslash".into(), true),
+            ';' => ("semicolon".into(), false),
             ':' => ("semicolon".into(), true),
-            '@' => ("2".into(), true),
+            '\'' => ("apostrophe".into(), false),
+            '"' => ("apostrophe".into(), true),
+            '`' => ("grave_accent".into(), false),
+            '~' => ("grave_accent".into(), true),
+            ',' => ("comma".into(), false),
+            '<' => ("comma".into(), true),
+            '.' => ("dot".into(), false),
+            '>' => ("dot".into(), true),
+            '/' => ("slash".into(), false),
+            '?' => ("slash".into(), true),
+            '\t' => ("tab".into(), false),
+            '\n' => ("ret".into(), false),
             _ => continue,
         };
         out.push(entry);
@@ -389,5 +427,26 @@ mod tests {
         assert!(sent[0].contains("\"type\":\"qcode\""));
         assert!(sent[0].contains("\"data\":\"a\""));
         assert!(sent[1].contains("\"type\":\"btn\""));
+    }
+
+    #[test]
+    fn text_mapping_covers_punctuation() {
+        // A#b  → shift+a(大写) / shift+3(#) / b
+        let keys = text_to_key_events("A#b");
+        assert_eq!(
+            keys,
+            vec![
+                ("a".to_string(), true),
+                ("3".to_string(), true),
+                ("b".to_string(), false),
+            ]
+        );
+        // 常见 shell 符号
+        let keys = text_to_key_events("ls -la; echo 'hi!' | grep h");
+        assert!(keys.contains(&("semicolon".to_string(), false)));
+        assert!(keys.contains(&("apostrophe".to_string(), false)));
+        assert!(keys.contains(&("1".to_string(), true))); // !
+        assert!(keys.contains(&("backslash".to_string(), true))); // |
+        assert!(keys.contains(&("minus".to_string(), false)));
     }
 }

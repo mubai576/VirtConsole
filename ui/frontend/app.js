@@ -117,6 +117,10 @@ function activate() {
 async function enterConsole(vmid = 9000) {
   consoleMode = true;
   document.body.classList.add("console-mode");
+  // kiosk 下需要显式获取键盘焦点
+  window.focus();
+  document.body.setAttribute("tabindex", "0");
+  document.body.focus();
   document.getElementById("crumb").textContent = `VM ${vmid} 控制台`;
   document.querySelector(".statusbar .hint").textContent = "Esc 返回 · 按键直接输入到虚拟机";
   toast(`正在连接 VM ${vmid} ...`);
@@ -157,7 +161,7 @@ async function qmpKey(qcode, down) {
   try {
     await window.__TAURI__.core.invoke("vm_input_key", { key: qcode, down });
   } catch (e) {
-    /* 未连接时忽略 */
+    if (consoleMode) toast("输入失败: " + e);
   }
 }
 
@@ -165,9 +169,15 @@ async function qmpText(text) {
   try {
     await window.__TAURI__.core.invoke("vm_input_text", { text });
   } catch (e) {
-    /* 未连接时忽略 */
+    if (consoleMode) toast("输入失败: " + e);
   }
 }
+
+// 点击画面重新获得焦点
+document.getElementById("vm-canvas").addEventListener("click", () => {
+  window.focus();
+  document.body.focus();
+});
 
 function move(dr, dc) {
   const nr = Math.min(SECTIONS.length - 1, Math.max(0, state.row + dr));

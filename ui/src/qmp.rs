@@ -10,7 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use qmp_engine::QmpClient;
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 
@@ -52,6 +52,10 @@ pub async fn connect(app: AppHandle, state: &QmpState, vmid: u32) -> Result<Stri
     state.capture_on.store(true, Ordering::Relaxed);
 
     eprintln!("[QMP] 已连接 VM {vmid}");
+    // 确保窗口获得键盘焦点（kiosk 下 WebView 可能未自动聚焦）
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_focus();
+    }
     let task = tokio::spawn(capture_loop(app.clone(), state.client.clone(), state.capture_on.clone()));
     *state.capture_task.lock().await = Some(task);
 
@@ -70,22 +74,26 @@ pub async fn disconnect(state: &QmpState) {
 
 pub async fn input_key(state: &QmpState, key: String, down: bool) -> Result<(), String> {
     let mut guard = state.client.lock().await;
-    guard
+    let res = guard
         .as_mut()
         .ok_or("未连接 VM")?
         .send_key(&key, down)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    eprintln!("[QMP] key={key} down={down} -> {:?}", res.as_ref().map(|_| "ok"));
+    res
 }
 
 pub async fn input_text(state: &QmpState, text: String) -> Result<(), String> {
     let mut guard = state.client.lock().await;
-    guard
+    let res = guard
         .as_mut()
         .ok_or("未连接 VM")?
         .type_text(&text)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    eprintln!("[QMP] text={text:?} -> {:?}", res.as_ref().map(|_| "ok"));
+    res
 }
 
 pub async fn status(state: &QmpState) -> String {
