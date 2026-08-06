@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 /// SMPTE 风格色条（R, G, B）
@@ -139,7 +139,9 @@ impl ApplicationHandler for TerminalApp {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // 持续动画需要轮询模式：Wait 模式下无事件时事件循环会休眠，画面只画一帧
+        event_loop.set_control_flow(ControlFlow::Poll);
         // 约 30fps 刷新，里程碑 1 仅用于验证渲染链路
         let should_redraw = match self.last_frame {
             Some(t) => t.elapsed() >= Duration::from_millis(33),
