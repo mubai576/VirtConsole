@@ -9,6 +9,8 @@ Weston Kiosk 全屏渲染 + 自研 Rust 应用，最终形态见 `docs/` 下的 
 该里程碑已在真机（PVE 9.2 + RTX 5070 Ti）上验证通过并部署为开机自启服务，
 详见 [docs/里程碑1-真机部署与验证记录.md](docs/里程碑1-真机部署与验证记录.md)。
 模式 1（QMP screendump 办公采集）已接入：HDMI 显示测试虚拟机（VM 9000）的实时画面。
+Tauri 主界面骨架已完成：十英尺 UI（电视 / PS5 / Xbox / Apple TV 风格焦点导航），
+纯 HTML/CSS/JS 实现（无 Node 依赖），方向键移动高亮、Enter 确认、Esc 返回。
 
 - Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
 - 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI
@@ -33,6 +35,11 @@ VirtConsole/
 │   ├── Cargo.toml
 │   ├── src/lib.rs
 │   └── examples/probe.rs     # 连接探针示例
+├── ui/                       # Tauri 主界面（十英尺 UI）
+│   ├── src/                  # Rust 入口 + IPC 命令
+│   ├── frontend/             # 纯 HTML/CSS/JS（无 Node）
+│   ├── capabilities/
+│   └── tauri.conf.json
 ├── deploy/                   # systemd 服务单元
 │   ├── virtconsole-weston.service
 │   └── virtconsole.service
@@ -87,6 +94,6 @@ Wayland socket、内核模块）。
 
 ## 下一步
 
-1. QMP 引擎 + screendump 帧率标定（PRD V1.0）
-2. 办公模式画面采集接入 + 手机遥控基础版
-3. Tauri 主界面接入（PRD V1.0）
+1. Tauri 界面接入 QMP：VM 画面推送 Canvas + 键鼠指令经 IPC 下发（复用同一条 QMP 连接）
+2. 手机遥控基础版（WebSocket 指令）
+3. 界面框架升级（按需引入 Vue/React）

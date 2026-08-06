@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["host", "qmp-engine"]
+members = ["host", "qmp-engine", "ui"]
 
 [profile.release]
 opt-level = 2
