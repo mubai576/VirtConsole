@@ -28,6 +28,10 @@ VirtConsole/
 │   └── src/
 │       ├── main.rs           # 窗口 + 渲染 + 事件循环
 │       └── environment.rs    # 启动前环境自检（GPU / Wayland）
+├── qmp-engine/               # QMP 引擎（VM 状态/启停/键鼠投递/screendump）
+│   ├── Cargo.toml
+│   ├── src/lib.rs
+│   └── examples/probe.rs     # 连接探针示例
 ├── deploy/                   # systemd 服务单元
 │   ├── virtconsole-weston.service
 │   └── virtconsole.service
