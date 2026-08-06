@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -101,27 +102,29 @@ impl QmpTransport for UnixQmpTransport {
 /// 内存 Mock 传输：开发机 / 单元测试用，按顺序返回预设响应。
 pub struct MockQmpTransport {
     responses: VecDeque<String>,
-    sent: Vec<String>,
+    sent: Arc<Mutex<Vec<String>>>,
 }
 
 impl MockQmpTransport {
     pub fn new(responses: Vec<&str>) -> Self {
         Self {
             responses: responses.into_iter().map(String::from).collect(),
-            sent: Vec::new(),
+            sent: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    /// 已发送的命令行（便于断言）
-    pub fn sent(&self) -> &[String] {
-        &self.sent
+    /// 已发送命令行的共享日志（便于测试断言）
+    pub fn sent_log(&self) -> Arc<Mutex<Vec<String>>> {
+        self.sent.clone()
     }
 }
 
 #[async_trait]
 impl QmpTransport for MockQmpTransport {
     async fn send_line(&mut self, line: &str) -> QmpResult<()> {
-        self.sent.push(line.to_string());
+        if let Ok(mut log) = self.sent.lock() {
+            log.push(line.to_string());
+        }
         Ok(())
     }
 
@@ -257,13 +260,19 @@ impl QmpClient {
         parse_ppm(&data).map_err(QmpError::Protocol)
     }
 
+    /// 批量发送输入事件（QMP 的 input-send-event 要求 events 数组，可一次多条）。
+    pub async fn send_events(&mut self, events: Vec<Value>) -> QmpResult<()> {
+        let args = json!({ "events": events });
+        self.command("input-send-event", Some(args)).await.map(|_| ())
+    }
+
     /// 发送键盘事件。key 为 QKeyCode 名称，如 "a"、"1"、"ctrl"、"up"、"ret"、"esc"。
     pub async fn send_key(&mut self, key: &str, down: bool) -> QmpResult<()> {
-        let args = json!({
+        let event = json!({
             "type": "key",
-            "data": { "key": key, "down": down }
+            "data": { "key": { "type": "qcode", "data": key }, "down": down }
         });
-        self.command("input-send-event", Some(args)).await.map(|_| ())
+        self.send_events(vec![event]).await
     }
 
     /// 一次按键（按下 + 抬起）
@@ -272,31 +281,31 @@ impl QmpClient {
         self.send_key(key, false).await
     }
 
-    /// 发送鼠标绝对坐标事件（axis: "x" / "y"）
-    pub async fn send_mouse_abs(&mut self, axis: &str, value: u32) -> QmpResult<()> {
-        let args = json!({
+    /// 发送鼠标绝对坐标事件（axis: "x" / "y"，坐标范围 0..65535）
+    pub async fn send_mouse_abs(&mut self, axis: &str, value: i32) -> QmpResult<()> {
+        let event = json!({
             "type": "abs",
             "data": { "axis": axis, "value": value }
         });
-        self.command("input-send-event", Some(args)).await.map(|_| ())
+        self.send_events(vec![event]).await
     }
 
     /// 发送鼠标相对移动事件（axis: "x" / "y"）
     pub async fn send_mouse_rel(&mut self, axis: &str, value: i32) -> QmpResult<()> {
-        let args = json!({
+        let event = json!({
             "type": "rel",
             "data": { "axis": axis, "value": value }
         });
-        self.command("input-send-event", Some(args)).await.map(|_| ())
+        self.send_events(vec![event]).await
     }
 
-    /// 发送鼠标按键事件（button: "left" / "right" / "middle"）
+    /// 发送鼠标按键事件（button: "left" / "right" / "middle" / "wheel-up" ...）
     pub async fn send_button(&mut self, button: &str, down: bool) -> QmpResult<()> {
-        let args = json!({
-            "type": "button",
+        let event = json!({
+            "type": "btn",
             "data": { "button": button, "down": down }
         });
-        self.command("input-send-event", Some(args)).await.map(|_| ())
+        self.send_events(vec![event]).await
     }
 }
 
@@ -319,5 +328,19 @@ mod tests {
         let transport = MockQmpTransport::new(vec![r#"{"error":{"class":"CommandNotFound","desc":"bad"}}"#]);
         let mut client = QmpClient::with_transport(Box::new(transport));
         assert!(matches!(client.status().await, Err(QmpError::Rpc(_))));
+    }
+
+    #[tokio::test]
+    async fn input_event_uses_events_array() {
+        let transport = MockQmpTransport::new(vec![r#"{"return":{}}"#, r#"{"return":{}}"#]);
+        let log = transport.sent_log();
+        let mut client = QmpClient::with_transport(Box::new(transport));
+        client.send_key("a", true).await.unwrap();
+        client.send_button("left", true).await.unwrap();
+        let sent = log.lock().unwrap();
+        assert!(sent[0].contains("\"events\""));
+        assert!(sent[0].contains("\"type\":\"qcode\""));
+        assert!(sent[0].contains("\"data\":\"a\""));
+        assert!(sent[1].contains("\"type\":\"btn\""));
     }
 }
