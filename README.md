@@ -13,6 +13,8 @@ Tauri 主界面骨架已完成：十英尺 UI（电视 / PS5 / Xbox / Apple TV �
 纯 HTML/CSS/JS 实现（无 Node 依赖），方向键移动高亮、Enter 确认、Esc 返回。
 **QMP 已整合进 Tauri**：VM 画面经单条 QMP 连接推送到前端 Canvas，
 界面按键经 IPC 走同一条连接投递到虚拟机；kiosk 服务已切换到 vc-ui。
+**内置浏览器已实现**：每个标签页 = 独立 Webview 窗口，支持任意 http/https
+页面（含 PVE 后台）；电视风格地址栏 + 快速链接 + 标签条。
 
 - Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
 - 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI

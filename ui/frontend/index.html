@@ -15,6 +15,22 @@
   <main id="grid"></main>
   <canvas id="vm-canvas"></canvas>
 
+  <div id="browser-overlay" class="hidden">
+    <div class="browser-head">
+      <input id="browser-addr" type="text" placeholder="输入网址，回车打开（如 https://192.168.0.20:8006）" autocomplete="off" spellcheck="false">
+      <button id="browser-go">打开</button>
+    </div>
+    <div class="browser-quick">
+      <span class="quick-title">快速链接</span>
+      <button class="quick" data-url="https://192.168.0.20:8006">PVE 后台</button>
+      <button class="quick" data-url="https://192.168.0.20:8006/?console=kvm&vmid=9000">VM 9000 网页控制台</button>
+      <button class="quick" data-url="http://192.168.0.1">局域网网关</button>
+      <button class="quick" data-url="https://example.com">示例站</button>
+    </div>
+    <div class="browser-tabs" id="browser-tabs"></div>
+    <div class="browser-hint">输入网址回车打开 · ↑↓ 切换地址栏/标签 · ←→ 选择标签 · Enter 聚焦 · 退格关闭 · Esc 退出</div>
+  </div>
+
   <footer class="statusbar">
     <span id="time">--:--</span>
     <span id="info">VirtConsole</span>

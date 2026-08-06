@@ -140,3 +140,114 @@ body.console-mode #vm-canvas {
 body.console-mode .statusbar .hint {
   margin-left: auto;
 }
+
+/* 浏览器模式 */
+#browser-overlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(1200px 700px at 50% -10%, #1b1b2e 0%, var(--bg) 60%);
+  padding: 60px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  z-index: 10;
+}
+
+#browser-overlay.hidden {
+  display: none;
+}
+
+.browser-head {
+  display: flex;
+  gap: 14px;
+}
+
+#browser-addr {
+  flex: 1;
+  height: 52px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 18px;
+  padding: 0 18px;
+  outline: none;
+}
+
+#browser-addr:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-glow);
+}
+
+#browser-go {
+  height: 52px;
+  padding: 0 26px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: #111;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.browser-quick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.quick-title {
+  color: var(--dim);
+  font-size: 14px;
+  letter-spacing: 2px;
+}
+
+.quick {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.quick:hover,
+.quick.focused {
+  border-color: var(--accent2);
+  background: rgba(77, 208, 225, 0.15);
+}
+
+.browser-tabs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.tab-chip {
+  max-width: 260px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab-chip.focused {
+  border-color: var(--accent);
+  box-shadow: var(--focus-glow);
+}
+
+.browser-hint {
+  color: #7d8396;
+  font-size: 13px;
+  margin-top: 8px;
+}
