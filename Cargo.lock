@@ -4434,10 +4434,13 @@ dependencies = [
 name = "vc-ui"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "qmp-engine",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tokio",
 ]
 
 [[package]]

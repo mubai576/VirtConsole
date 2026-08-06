@@ -8,9 +8,10 @@ After=virtconsole-weston.service
 # 后续改为组授权（ACL）后可降回 virtconsole 用户
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=/run/virtconsole
-Environment=VIRTCONSOLE_VMID=9000
+Environment=VIRTCONSOLE_AUTOCONNECT_VMID=9000
+Environment=GDK_BACKEND=wayland
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /run/virtconsole/wayland-0 ] && exit 0; sleep 1; done; exit 1'
-ExecStart=/usr/local/bin/virtconsole-host
+ExecStart=/usr/local/bin/vc-ui
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=10

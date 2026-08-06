@@ -266,13 +266,17 @@ impl QmpClient {
         self.command("input-send-event", Some(args)).await.map(|_| ())
     }
 
-    /// 发送键盘事件。key 为 QKeyCode 名称，如 "a"、"1"、"ctrl"、"up"、"ret"、"esc"。
-    pub async fn send_key(&mut self, key: &str, down: bool) -> QmpResult<()> {
-        let event = json!({
+    /// 生成单个键盘事件（QKeyCode，QAPI alternate 形式）
+    pub fn key_event(key: &str, down: bool) -> Value {
+        json!({
             "type": "key",
             "data": { "key": { "type": "qcode", "data": key }, "down": down }
-        });
-        self.send_events(vec![event]).await
+        })
+    }
+
+    /// 发送键盘事件。key 为 QKeyCode 名称，如 "a"、"1"、"ctrl"、"up"、"ret"、"esc"。
+    pub async fn send_key(&mut self, key: &str, down: bool) -> QmpResult<()> {
+        self.send_events(vec![Self::key_event(key, down)]).await
     }
 
     /// 一次按键（按下 + 抬起）
@@ -307,6 +311,49 @@ impl QmpClient {
         });
         self.send_events(vec![event]).await
     }
+
+    /// 将文本批量键入（自动处理大小写 / shift 组合），一次 QMP 调用完成。
+    pub async fn type_text(&mut self, text: &str) -> QmpResult<()> {
+        self.send_events(text_to_events(text)).await
+    }
+}
+
+/// 文本 → (QKeyCode, 是否需要 shift)。
+pub fn text_to_key_events(text: &str) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    for c in text.chars() {
+        let entry = match c {
+            'a'..='z' => (c.to_string(), false),
+            'A'..='Z' => (c.to_ascii_lowercase().to_string(), true),
+            '0'..='9' => (c.to_string(), false),
+            ' ' => ("spc".into(), false),
+            '-' => ("minus".into(), false),
+            '_' => ("minus".into(), true),
+            '.' => ("dot".into(), false),
+            '/' => ("slash".into(), false),
+            ':' => ("semicolon".into(), true),
+            '@' => ("2".into(), true),
+            _ => continue,
+        };
+        out.push(entry);
+    }
+    out
+}
+
+/// 文本 → 批量输入事件（含 shift 按下/抬起）。
+pub fn text_to_events(text: &str) -> Vec<Value> {
+    let mut events = Vec::new();
+    for (key, shift) in text_to_key_events(text) {
+        if shift {
+            events.push(QmpClient::key_event("shift", true));
+        }
+        events.push(QmpClient::key_event(&key, true));
+        events.push(QmpClient::key_event(&key, false));
+        if shift {
+            events.push(QmpClient::key_event("shift", false));
+        }
+    }
+    events
 }
 
 #[cfg(test)]

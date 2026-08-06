@@ -116,3 +116,27 @@ html, body {
 }
 
 .toast.hidden { opacity: 0; transform: translateX(-50%) translateY(8px); pointer-events: none; }
+
+/* 控制台模式：VM 画面全屏 */
+#vm-canvas {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+body.console-mode #grid,
+body.console-mode .topbar {
+  display: none;
+}
+
+body.console-mode #vm-canvas {
+  display: block;
+}
+
+body.console-mode .statusbar .hint {
+  margin-left: auto;
+}

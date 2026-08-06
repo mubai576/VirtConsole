@@ -11,6 +11,8 @@ Weston Kiosk 全屏渲染 + 自研 Rust 应用，最终形态见 `docs/` 下的 
 模式 1（QMP screendump 办公采集）已接入：HDMI 显示测试虚拟机（VM 9000）的实时画面。
 Tauri 主界面骨架已完成：十英尺 UI（电视 / PS5 / Xbox / Apple TV 风格焦点导航），
 纯 HTML/CSS/JS 实现（无 Node 依赖），方向键移动高亮、Enter 确认、Esc 返回。
+**QMP 已整合进 Tauri**：VM 画面经单条 QMP 连接推送到前端 Canvas，
+界面按键经 IPC 走同一条连接投递到虚拟机；kiosk 服务已切换到 vc-ui。
 
 - Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
 - 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI
@@ -95,5 +97,5 @@ Wayland socket、内核模块）。
 ## 下一步
 
 1. Tauri 界面接入 QMP：VM 画面推送 Canvas + 键鼠指令经 IPC 下发（复用同一条 QMP 连接）
-2. 手机遥控基础版（WebSocket 指令）
-3. 界面框架升级（按需引入 Vue/React）
+2. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）
+3. 画面模式切换（办公 / 游戏 / 直通）与多 VM 支持

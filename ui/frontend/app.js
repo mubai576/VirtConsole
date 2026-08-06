@@ -28,6 +28,28 @@ const SECTIONS = [
 ];
 
 const state = { row: 0, col: 0 };
+let consoleMode = false;
+const pressedKeys = new Set(); // 当前按下的 QKeyCode（需要 keyup 释放）
+
+const SPECIAL_KEYS = {
+  Enter: "ret",
+  Backspace: "backspace",
+  Tab: "tab",
+  Delete: "delete",
+  Home: "home",
+  End: "end",
+  PageUp: "pgup",
+  PageDown: "pgdn",
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  Control: "ctrl",
+  Shift: "shift",
+  Alt: "alt",
+  F1: "f1", F2: "f2", F3: "f3", F4: "f4", F5: "f5", F6: "f6",
+  F7: "f7", F8: "f8", F9: "f9", F10: "f10", F11: "f11", F12: "f12",
+};
 
 function buildGrid() {
   const grid = document.getElementById("grid");
@@ -78,6 +100,10 @@ function toast(text) {
 
 function activate() {
   const tile = SECTIONS[state.row].tiles[state.col];
+  if (tile.id === "vm-9000") {
+    enterConsole();
+    return;
+  }
   if (tile.id === "info") {
     window.__TAURI__.core
       .invoke("app_info")
@@ -86,6 +112,61 @@ function activate() {
     return;
   }
   toast(`${tile.title} —— 功能开发中`);
+}
+
+async function enterConsole(vmid = 9000) {
+  consoleMode = true;
+  document.body.classList.add("console-mode");
+  document.getElementById("crumb").textContent = `VM ${vmid} 控制台`;
+  document.querySelector(".statusbar .hint").textContent = "Esc 返回 · 按键直接输入到虚拟机";
+  toast(`正在连接 VM ${vmid} ...`);
+  try {
+    const res = await window.__TAURI__.core.invoke("vm_connect", { vmid });
+    toast(res);
+  } catch (e) {
+    toast("连接失败: " + e);
+  }
+}
+
+function exitConsole() {
+  consoleMode = false;
+  document.body.classList.remove("console-mode");
+  document.querySelector(".statusbar .hint").textContent = "↑↓←→ 选择 · Enter 确认 · Esc 返回";
+  focusEl();
+}
+
+function drawFrame(width, height, b64) {
+  const canvas = document.getElementById("vm-canvas");
+  const ctx = canvas.getContext("2d");
+  const bin = atob(b64);
+  const rgb = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) rgb[i] = bin.charCodeAt(i);
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+    rgba[j] = rgb[i];
+    rgba[j + 1] = rgb[i + 1];
+    rgba[j + 2] = rgb[i + 2];
+    rgba[j + 3] = 255;
+  }
+  canvas.width = width;
+  canvas.height = height;
+  ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+}
+
+async function qmpKey(qcode, down) {
+  try {
+    await window.__TAURI__.core.invoke("vm_input_key", { key: qcode, down });
+  } catch (e) {
+    /* 未连接时忽略 */
+  }
+}
+
+async function qmpText(text) {
+  try {
+    await window.__TAURI__.core.invoke("vm_input_text", { text });
+  } catch (e) {
+    /* 未连接时忽略 */
+  }
 }
 
 function move(dr, dc) {
@@ -97,6 +178,21 @@ function move(dr, dc) {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (consoleMode) {
+    e.preventDefault();
+    if (e.key === "Escape") {
+      exitConsole();
+      return;
+    }
+    const qcode = SPECIAL_KEYS[e.key];
+    if (qcode) {
+      qmpKey(qcode, true);
+      pressedKeys.add(qcode);
+    } else if (e.key.length === 1) {
+      qmpText(e.key);
+    }
+    return;
+  }
   switch (e.key) {
     case "ArrowUp": move(-1, 0); e.preventDefault(); break;
     case "ArrowDown": move(1, 0); e.preventDefault(); break;
@@ -113,6 +209,28 @@ document.addEventListener("keydown", (e) => {
     default:
       break;
   }
+});
+
+document.addEventListener("keyup", (e) => {
+  if (!consoleMode) return;
+  const qcode = SPECIAL_KEYS[e.key];
+  if (qcode && pressedKeys.has(qcode)) {
+    qmpKey(qcode, false);
+    pressedKeys.delete(qcode);
+  }
+});
+
+// VM 帧与状态事件
+window.__TAURI__.event.listen("vm-frame", (ev) => {
+  drawFrame(ev.payload.width, ev.payload.height, ev.payload.data);
+});
+window.__TAURI__.event.listen("vm-status", (ev) => {
+  document.getElementById("info").textContent = ev.payload.detail || ev.payload.state;
+});
+
+// 开机直连：页面加载完成后查询目标 VM（避免启动时事件竞态）
+window.__TAURI__.core.invoke("boot_vmid").then((vmid) => {
+  if (vmid) enterConsole(vmid);
 });
 
 function clock() {
