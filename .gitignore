@@ -6,6 +6,10 @@
 node_modules
 dist
 
+# Tauri 构建生成物
+ui/gen
+ui/target
+
 # 系统 / 编辑器
 *.log
 .DS_Store
