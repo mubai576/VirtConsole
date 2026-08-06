@@ -7,3 +7,5 @@ description = "VirtConsole 宿主机渲染终端（里程碑 1：HDMI 单应用�
 [dependencies]
 winit = "0.30"
 softbuffer = "0.4"
+qmp-engine = { path = "../qmp-engine" }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }

@@ -8,6 +8,7 @@ Weston Kiosk 全屏渲染 + 自研 Rust 应用，最终形态见 `docs/` 下的 
 第一步要解决整个系统最基础的问题：**真实环境下，一块 HDMI 屏上只跑一个自研应用**。
 该里程碑已在真机（PVE 9.2 + RTX 5070 Ti）上验证通过并部署为开机自启服务，
 详见 [docs/里程碑1-真机部署与验证记录.md](docs/里程碑1-真机部署与验证记录.md)。
+模式 1（QMP screendump 办公采集）已接入：HDMI 显示测试虚拟机（VM 9000）的实时画面。
 
 - Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
 - 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI

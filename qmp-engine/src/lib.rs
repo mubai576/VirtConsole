@@ -16,6 +16,9 @@ use std::path::Path;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
+pub mod frame;
+pub use frame::{parse_ppm, RgbFrame};
+
 #[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 #[cfg(unix)]
@@ -244,6 +247,14 @@ impl QmpClient {
         self.command("screendump", Some(args))
             .await
             .map(|_| ())
+    }
+
+    /// screendump 到文件并解析为 RGB 帧（PPM，模式 1 采集的核心路径）。
+    /// 注意：此处用 std::fs::read 同步读取，文件很小（单帧），阻塞可忽略。
+    pub async fn screendump_ppm(&mut self, path: &str) -> QmpResult<RgbFrame> {
+        self.screendump(path).await?;
+        let data = std::fs::read(path).map_err(QmpError::Io)?;
+        parse_ppm(&data).map_err(QmpError::Protocol)
     }
 
     /// 发送键盘事件。key 为 QKeyCode 名称，如 "a"、"1"、"ctrl"、"up"、"ret"、"esc"。

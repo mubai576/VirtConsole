@@ -4,10 +4,11 @@ Requires=virtconsole-weston.service
 After=virtconsole-weston.service
 
 [Service]
-User=virtconsole
-Group=virtconsole
+# 临时以 root 运行：QMP socket（/var/run/qemu-server/<vmid>.qmp）仅 root 可访问；
+# 后续改为组授权（ACL）后可降回 virtconsole 用户
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=/run/virtconsole
+Environment=VIRTCONSOLE_VMID=9000
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /run/virtconsole/wayland-0 ] && exit 0; sleep 1; done; exit 1'
 ExecStart=/usr/local/bin/virtconsole-host
 Restart=on-failure

@@ -4,6 +4,7 @@
 //! 本里程碑使用 winit + softbuffer 直接渲染测试图案，不依赖桌面环境。
 
 mod environment;
+mod display_source;
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -26,18 +27,44 @@ const COLOR_BARS: [(u32, u32, u32); 7] = [
     (0, 0, 192),     // 蓝
 ];
 
+/// 测试图案：7 色条 + 移动白线（无 VM 采集时的回退画面）
+fn draw_test_pattern(buffer: &mut [u32], width: u32, height: u32, started: Instant) {
+    let sweep = (started.elapsed().as_secs_f32() * 120.0) % width as f32;
+    let bar_count = COLOR_BARS.len() as f32;
+
+    for y in 0..height {
+        for x in 0..width {
+            let bar_index = ((x as f32 / width as f32) * bar_count)
+                .floor()
+                .min(bar_count - 1.0) as usize;
+            let (r, g, b) = COLOR_BARS[bar_index];
+            let is_sweep = (x as f32 - sweep).abs() < 6.0;
+            // softbuffer 颜色格式：0x00RRGGBB
+            let pixel = if is_sweep {
+                0x00FF_FFFF
+            } else {
+                (r << 16) | (g << 8) | b
+            };
+            buffer[y as usize * width as usize + x as usize] = pixel;
+        }
+    }
+}
+
 struct TerminalApp {
     window: Option<Rc<Window>>,
     surface: Option<Surface<Rc<Window>, Rc<Window>>>,
+    /// VM 采集帧（模式 1）；为 None 时显示测试图案
+    frame: Option<display_source::SharedFrame>,
     started: Instant,
     last_frame: Option<Instant>,
 }
 
 impl TerminalApp {
-    fn new() -> Self {
+    fn new(vm_frame: Option<display_source::SharedFrame>) -> Self {
         Self {
             window: None,
             surface: None,
+            frame: vm_frame,
             started: Instant::now(),
             last_frame: None,
         }
@@ -63,25 +90,17 @@ impl TerminalApp {
             Err(_) => return,
         };
 
-        // 缓慢移动的白色扫描线：用于确认画面在实时刷新
-        let sweep = (self.started.elapsed().as_secs_f32() * 120.0) % size.width as f32;
-        let bar_count = COLOR_BARS.len() as f32;
-
-        for y in 0..size.height {
-            for x in 0..size.width {
-                let bar_index = ((x as f32 / size.width as f32) * bar_count)
-                    .floor()
-                    .min(bar_count - 1.0) as usize;
-                let (r, g, b) = COLOR_BARS[bar_index];
-                let is_sweep = (x as f32 - sweep).abs() < 6.0;
-                // softbuffer 颜色格式：0x00RRGGBB
-                let pixel = if is_sweep {
-                    0x00FF_FFFF
-                } else {
-                    (r << 16) | (g << 8) | b
-                };
-                buffer[y as usize * size.width as usize + x as usize] = pixel;
+        let mut drawn = false;
+        if let Some(shared) = &self.frame {
+            if let Ok(guard) = shared.lock() {
+                if let Some(frame) = guard.as_ref() {
+                    display_source::blit_rgb(&mut buffer, size.width, size.height, frame);
+                    drawn = true;
+                }
             }
+        }
+        if !drawn {
+            draw_test_pattern(&mut buffer, size.width, size.height, self.started);
         }
 
         let _ = buffer.present();
@@ -168,6 +187,20 @@ fn main() {
 
     println!("[VirtConsole] 启动 HDMI 渲染终端（Ctrl+C 退出）...");
 
+    // 画面来源：设置 VIRTCONSOLE_VMID 时采集指定 VM（模式 1 办公采集），否则显示测试图案
+    let vm_frame = std::env::var("VIRTCONSOLE_VMID")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .map(|vmid| {
+            eprintln!("[VirtConsole] 画面来源: VM {vmid} QMP screendump（模式 1）");
+            let shared = display_source::new_shared_frame();
+            display_source::spawn_qmp_capture(vmid, shared.clone());
+            shared
+        });
+    if vm_frame.is_none() {
+        println!("[VirtConsole] 未设置 VIRTCONSOLE_VMID，显示测试图案");
+    }
+
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(e) => {
@@ -177,7 +210,7 @@ fn main() {
         }
     };
 
-    let mut app = TerminalApp::new();
+    let mut app = TerminalApp::new(vm_frame);
     if event_loop.run_app(&mut app).is_err() {
         eprintln!("[错误] 应用运行异常退出");
         std::process::exit(1);
