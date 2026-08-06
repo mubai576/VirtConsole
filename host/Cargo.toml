@@ -1,0 +1,9 @@
+[package]
+name = "virtconsole-host"
+version = "0.1.0"
+edition = "2021"
+description = "VirtConsole 宿主机渲染终端（里程碑 1：HDMI 单应用渲染）"
+
+[dependencies]
+winit = "0.30"
+softbuffer = "0.4"

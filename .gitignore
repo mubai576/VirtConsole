@@ -1,0 +1,14 @@
+# Rust
+/target
+**/target
+
+# 前端（后续 Tauri 里程碑会用到）
+node_modules
+dist
+
+# 系统 / 编辑器
+*.log
+.DS_Store
+Thumbs.db
+.idea
+.vscode

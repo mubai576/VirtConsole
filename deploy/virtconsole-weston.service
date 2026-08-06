@@ -1,0 +1,22 @@
+[Unit]
+Description=VirtConsole Weston Kiosk (Wayland compositor on HDMI)
+Wants=systemd-user-sessions.service
+After=systemd-user-sessions.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=virtconsole
+Group=virtconsole
+SupplementaryGroups=video render input tty
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+ExecStartPre=/bin/install -d -m 700 -o virtconsole -g virtconsole /run/user/%U
+ExecStart=/usr/bin/weston --backend=drm-backend.so --shell=kiosk-shell.so --tty=1
+Restart=on-failure
+RestartSec=3
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target
