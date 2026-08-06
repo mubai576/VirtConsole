@@ -254,24 +254,28 @@ function move(dr, dc) {
 
 document.addEventListener("keydown", (e) => {
   if (browserMode) {
-    e.preventDefault();
     if (e.key === "Escape") {
+      e.preventDefault();
       exitBrowser();
       return;
     }
     if (browserFocus === "addr") {
       if (e.key === "Enter") {
+        e.preventDefault();
         browserOpenUrl(document.getElementById("browser-addr").value);
       } else if (e.key === "ArrowDown" || e.key === "Tab") {
+        e.preventDefault();
         browserFocus = "tabs";
         browserSel = Math.min(browserSel, Math.max(0, browserTabs.length - 1));
         renderTabs();
       } else if (e.key === "ArrowUp") {
+        e.preventDefault();
         browserFocus = "quick";
         renderQuick();
       }
-      return;
+      return; // 其余按键交给地址输入框处理
     }
+    e.preventDefault();
     if (browserFocus === "quick") {
       if (e.key === "ArrowUp" || e.key === "Tab") {
         browserFocus = "addr";
