@@ -4,7 +4,7 @@
 //! 后续接入 QMP 画面帧推送与键鼠指令转发（见 PRD）。
 
 use serde_json::json;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod browser;
 mod qmp;
@@ -69,6 +69,16 @@ fn browser_back(app: tauri::AppHandle, label: String) -> Result<(), String> {
 #[tauri::command]
 fn browser_forward(app: tauri::AppHandle, label: String) -> Result<(), String> {
     browser::forward(&app, label)
+}
+
+#[tauri::command]
+fn browser_exit(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, BrowserState>,
+) -> Result<(), String> {
+    let _ = browser::close_all(&app, &state);
+    let _ = app.emit("browser-exit", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -141,7 +151,8 @@ pub fn run() {
             browser_close_all,
             browser_focus,
             browser_back,
-            browser_forward
+            browser_forward,
+            browser_exit
         ])
         .run(tauri::generate_context!())
         .expect("VirtConsole 启动失败");

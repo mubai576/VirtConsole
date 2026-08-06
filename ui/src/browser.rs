@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::webview::PageLoadEvent;
 
 #[derive(Clone, Serialize)]
 pub struct Tab {
@@ -51,6 +52,27 @@ pub fn open(app: &AppHandle, state: &BrowserState, url: String) -> Result<String
         .title("VirtConsole 浏览器")
         .inner_size(1280.0, 800.0)
         .position(0.0, 0.0)
+        .on_page_load(|webview, payload| {
+            // 网页窗口拿到焦点后，主窗口收不到 Esc；注入返回按钮 + Esc 监听
+            if payload.event() == PageLoadEvent::Finished {
+                let js = r#"(function(){
+                    function vcExit(){
+                        if (window.__TAURI__) {
+                            window.__TAURI__.core.invoke('browser_exit').catch(function(){});
+                        }
+                    }
+                    var btn = document.createElement('button');
+                    btn.textContent = '◀ 返回';
+                    btn.style.cssText = 'position:fixed;top:14px;left:14px;z-index:2147483647;padding:10px 16px;border-radius:8px;border:none;background:rgba(255,213,79,.96);color:#111;font-size:14px;font-family:sans-serif;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4);';
+                    btn.addEventListener('click', vcExit);
+                    document.documentElement.appendChild(btn);
+                    document.addEventListener('keydown', function(e){
+                        if (e.key === 'Escape') { vcExit(); }
+                    }, true);
+                })();"#;
+                let _ = webview.eval(js);
+            }
+        })
         .build()
     {
         Ok(w) => w,

@@ -161,6 +161,8 @@ function exitBrowser() {
   browserMode = false;
   document.getElementById("browser-overlay").classList.add("hidden");
   window.__TAURI__.core.invoke("browser_close_all").catch(() => {});
+  window.focus();
+  document.body.focus();
   document.querySelector(".statusbar .hint").textContent = "↑↓←→ 选择 · Enter 确认 · Esc 返回";
   focusEl();
 }
@@ -376,6 +378,11 @@ window.__TAURI__.event.listen("browser-tabs", (ev) => {
   browserTabs = ev.payload;
   browserSel = Math.min(browserSel, Math.max(0, browserTabs.length - 1));
   renderTabs();
+});
+
+// 子窗口（网页）里按 Esc / 点返回按钮 → 退出浏览器模式
+window.__TAURI__.event.listen("browser-exit", () => {
+  if (browserMode) exitBrowser();
 });
 
 // 开机直连：页面加载完成后查询目标 VM（避免启动时事件竞态）
