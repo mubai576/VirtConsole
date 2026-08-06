@@ -13,15 +13,19 @@ fi
 
 echo "=== VirtConsole 安装（里程碑 1）==="
 
-# 1. 系统依赖
-apt-get update
-apt-get install -y weston wayland-protocols mesa-utils pciutils
+# 1. 系统依赖（seatd 用于非 root 用户获取 DRM 主控权）
+# 企业订阅源（pve-enterprise）在无订阅时会返回 401，容忍该错误，不影响其他源
+apt-get update || true
+apt-get install -y weston wayland-protocols mesa-utils pciutils seatd
 
 # 2. 专用运行用户（Weston 不允许以 root 运行合成器）
 if ! id "${RUNTIME_USER}" >/dev/null 2>&1; then
   useradd --system --create-home --shell /usr/sbin/nologin "${RUNTIME_USER}"
 fi
 usermod -a -G video,render,input,tty "${RUNTIME_USER}"
+
+# seatd 服务（非 root 用户跑 Weston 必需；Debian 默认以 video 组授权 socket 访问）
+systemctl enable --now seatd
 
 # 3. 部署 systemd 服务
 install -m 0644 deploy/virtconsole-weston.service /etc/systemd/system/

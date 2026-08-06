@@ -8,15 +8,12 @@ Conflicts=getty@tty1.service
 User=virtconsole
 Group=virtconsole
 SupplementaryGroups=video render input tty
-Environment=XDG_RUNTIME_DIR=/run/user/%U
-ExecStartPre=/bin/install -d -m 700 -o virtconsole -g virtconsole /run/user/%U
-ExecStart=/usr/bin/weston --backend=drm-backend.so --shell=kiosk-shell.so --tty=1
+Environment=XDG_RUNTIME_DIR=/run/virtconsole
+RuntimeDirectory=virtconsole
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/weston --backend=drm-backend.so --shell=kiosk-shell.so --socket=wayland-0
 Restart=on-failure
 RestartSec=3
-StandardInput=tty
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
 
 [Install]
 WantedBy=multi-user.target

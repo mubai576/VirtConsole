@@ -1,11 +1,13 @@
 # VirtConsole — PVE 一体化 HDMI 自研终端系统
 
-在 PVE 宿主机（Debian 12）上运行的本地 HDMI 终端：无桌面会话、无容器，
+在 PVE 宿主机（实测 PVE 9.x / Debian 13）上运行的本地 HDMI 终端：无桌面会话、无容器，
 Weston Kiosk 全屏渲染 + 自研 Rust 应用，最终形态见 `docs/` 下的 PRD（V1.1 修订稿）。
 
-## 当前里程碑（M0.5：HDMI 单应用渲染）
+## 当前状态（里程碑 1：HDMI 单应用渲染 —— 已完成）
 
-第一步先解决整个系统最基础的问题：**真实环境下，一块 HDMI 屏上只跑一个自研应用**。
+第一步要解决整个系统最基础的问题：**真实环境下，一块 HDMI 屏上只跑一个自研应用**。
+该里程碑已在真机（PVE 9.2 + RTX 5070 Ti）上验证通过并部署为开机自启服务，
+详见 [docs/里程碑1-真机部署与验证记录.md](docs/里程碑1-真机部署与验证记录.md)。
 
 - Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
 - 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI
@@ -20,7 +22,7 @@ Weston Kiosk 全屏渲染 + 自研 Rust 应用，最终形态见 `docs/` 下的 
 ```text
 VirtConsole/
 ├── Cargo.toml                # Rust workspace
-├── docs/                     # PRD 与开发计划（V1.1）
+├── docs/                     # PRD（V1.1）+ 里程碑部署记录
 ├── host/                     # 宿主机渲染终端（Rust）
 │   ├── Cargo.toml
 │   └── src/
@@ -48,7 +50,10 @@ VIRTCONSOLE_MOCK=1 cargo run -p virtconsole-host
 
 （Windows 下自动进入 Mock 模式；Linux 开发机也可用上面的环境变量跳过校验。）
 
-### 真机（PVE 宿主机，Debian 12）
+### 真机（PVE 宿主机）
+
+真机需先安装 NVIDIA 驱动（Blackwell 显卡必须用 nvidia-open 开源内核模块，
+详见部署记录第 3.2 节），再执行：
 
 ```bash
 # 1. 构建
@@ -72,10 +77,11 @@ journalctl -u virtconsole -f
 - **仅有一块显卡且开启 SR-IOV / 直通后宿主机无可用 GPU** → 同样被上述检查拦截，给出提示
 - 开发调试可用 `VIRTCONSOLE_MOCK=1` 跳过校验
 
-`scripts/check.sh` 提供同类的安装前自检（GPU、Weston、Wayland socket、内核模块）。
+`scripts/check.sh` 提供同类的安装前自检（GPU / 渲染节点、Weston、seatd、
+Wayland socket、内核模块）。
 
 ## 下一步
 
-1. 真机验证 HDMI 渲染 + 帧率表现
-2. QMP 引擎 + screendump 帧率标定（PRD V1.0）
+1. QMP 引擎 + screendump 帧率标定（PRD V1.0）
+2. 办公模式画面采集接入 + 手机遥控基础版
 3. Tauri 主界面接入（PRD V1.0）

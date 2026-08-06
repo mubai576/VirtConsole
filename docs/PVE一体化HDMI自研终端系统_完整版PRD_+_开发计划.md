@@ -8,7 +8,7 @@ PVE 一体化 HDMI 自研终端系统
  
 - 项目名称：PVE 一体化 HDMI 自研终端控制系统
 - 项目定位：纯自研、无第三方串流、无桌面会话、无容器依赖、适配办公 / 游戏 / SR-IOV 直通三模画面采集、本地 HDMI 大屏终端 + 手机局域网遥控器
-- 运行环境：Proxmox VE 宿主机（Debian12）
+- 运行环境：Proxmox VE 宿主机（实测 PVE 9.x / Debian 13，历史文档中的 Debian 12 已过时）
 - 图形底座：Weston Wayland（KMS-DRM 原生）
 - 核心技术栈：Tauri2 + Rust + Axum + QMP + Canvas + WebSocket
 - 废弃依赖：Docker / X11 / GNOME / Moonlight / VNC/RDP/SPICE/uinput
