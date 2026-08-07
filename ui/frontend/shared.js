@@ -332,6 +332,8 @@ export function showInfoModal({ title, items }) {
  */
 export function showForm({ title, fields, confirmText = "保存" }) {
   return new Promise((resolve) => {
+    // 打开表单前清除底层内容高亮，保证单高亮不变量（与 openModal 一致）
+    document.querySelectorAll(".focused").forEach((el) => el.classList.remove("focused"));
     const ov = document.createElement("div");
     ov.className = "modal";
     ov.setAttribute("tabindex", "-1");

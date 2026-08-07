@@ -625,6 +625,9 @@ html, body {
   cursor: default;
   transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
 }
+.mon-cards .info-cell.selected {
+  border-color: var(--accent);
+}
 .mon-cards .info-cell.focused {
   border-color: var(--accent);
   box-shadow: var(--focus-ring);

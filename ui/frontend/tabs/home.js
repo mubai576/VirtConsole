@@ -89,7 +89,8 @@ async function refreshVms() {
       });
     });
   }
-  render();
+  // 仅激活态渲染焦点（后台刷新不得重加 .focused 造成跨 Tab 残留）
+  if (homeActive()) render();
 }
 
 function buildQuick() {
@@ -102,9 +103,17 @@ function buildQuick() {
   quicks.forEach((q) => pushItem("quick", wrap, { label: q.label, action: q.action }));
 }
 
+function homeActive() {
+  const sec = document.querySelector('[data-tab="home"]');
+  return !!sec && sec.classList.contains("active");
+}
+
 function focus() {
   focusIndex = Math.min(focusIndex, Math.max(0, items.length - 1));
   render();
+  // 回到首页时补拉数据（首次加载/异步就绪）
+  refreshHost();
+  refreshVms();
 }
 
 function render() {
@@ -153,4 +162,5 @@ function clock() {
 }
 clock();
 setInterval(clock, 10000);
-setInterval(() => { refreshHost(); refreshVms(); }, 10000);
+// 仅首页激活时刷新数据（后台刷新不应影响焦点状态）
+setInterval(() => { if (homeActive()) { refreshHost(); refreshVms(); } }, 10000);

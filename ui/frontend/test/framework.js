@@ -7,6 +7,17 @@
 // - 提供键盘/鼠标/异步等待辅助。
 
 const results = [];
+let errorCount = 0;
+
+// 全局错误捕获（J2 不变量：交互后无未捕获异常）
+window.addEventListener("error", (e) => {
+  errorCount++;
+  console.error("[VC-TEST] page error:", e.message);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  errorCount++;
+  console.error("[VC-TEST] unhandled rejection:", e.reason);
+});
 
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 export const flush = (ms = 25) => wait(ms);
@@ -40,6 +51,12 @@ export function hover(el) {
   el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
 }
 
+// 沉浸层（控制台）是否可见
+export function consoleVisible() {
+  const layer = q("#console-layer");
+  return !!layer && !layer.classList.contains("hidden");
+}
+
 // 全局不变量：单高亮
 export function assertSingleFocus() {
   const modal = document.querySelector(".modal");
@@ -56,11 +73,15 @@ export function assertSingleFocus() {
   if (activeViews > 1) throw new Error(`active tab 视图 ${activeViews} 个`);
 }
 
-// 执行一个测试步骤：fn 跑完 + 不变量校验；收集结果
+// 执行一个测试步骤：fn 跑完 + 不变量校验 + 无新页面错误；收集结果
 export async function step(name, fn) {
+  const errBefore = errorCount;
   try {
     await fn();
     assertSingleFocus();
+    if (errorCount !== errBefore) {
+      throw new Error(`交互期间产生 ${errorCount - errBefore} 个未捕获错误`);
+    }
     results.push({ name, pass: true, detail: "" });
     console.log(`[VC-TEST] PASS ${name}`);
   } catch (e) {
@@ -83,15 +104,17 @@ export function activeTabId() {
   return v ? v.dataset.tab : null;
 }
 
-// 强制回到首页内容态（测试隔离用）：处理"当前处于 Tab 栏"的情况
+// 强制回到首页内容态（测试隔离用）：
+// 1) Ctrl+Alt+Q 退出控制台/终端（无活动时无副作用） 2) 关任意模态 3) 处理"停在 Tab 栏"的情况
 export async function goHome() {
+  ctrlAltQ();
+  await flush(100);
   if (q(".modal")) {
     key("Escape");
     await flush(30);
   }
   key("Home");
   await flush(30);
-  // 若仍停在 Tab 栏（ring），按 Enter 进入内容
   if (q("#tabbar .tab.focus")) {
     key("Enter");
     await flush(50);

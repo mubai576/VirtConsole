@@ -21,6 +21,16 @@ const fstate = { mode: "list", idx: 0, sub: 0, row: "nav", cidx: 0 };
 const SUB_VM = ["概览", "监控", "操作"];
 const SUB_HOST = ["概览", "监控", "终端"];
 
+// 测试插桩：暴露内部状态供 VIRTCONSOLE_TEST 驱动断言
+window.__vcDebug = () => ({
+  mode: fstate.mode,
+  sub: fstate.sub,
+  row: fstate.row,
+  cidx: fstate.cidx,
+  contentLen: focusContentList.length,
+  entityKind: fstate.currentEntity ? fstate.currentEntity.kind : null,
+});
+
 function subNav() {
   return fstate.currentEntity?.kind === "host" ? SUB_HOST : SUB_VM;
 }
@@ -170,7 +180,23 @@ function renderSubView() {
   const e = fstate.currentEntity;
   if (e.kind === "host") {
     if (fstate.sub === 0) sv.innerHTML = hostOverview();
-    else if (fstate.sub === 1) monController = startMonitor(sv, e);
+    else if (fstate.sub === 1) {
+      monController = startMonitor(
+        sv,
+        e,
+        (i) => { // 卡片点击/悬停 → 进入内容并选中
+          fstate.row = "content";
+          clearNavFocus();
+          fstate.cidx = i;
+          updateContentFocus();
+          monController.setMetric(i);
+        },
+        (cards) => { // 卡片异步就绪后同步焦点列表
+          focusContentList = cards;
+          if (fstate.row === "content") updateContentFocus();
+        }
+      );
+    }
     else {
       startTerminal(sv);
       termActive = true;
@@ -178,7 +204,23 @@ function renderSubView() {
     }
   } else {
     if (fstate.sub === 0) sv.innerHTML = detail ? vmOverview() : placeholder("⏳", "加载中", "正在读取 VM 配置…");
-    else if (fstate.sub === 1) monController = startMonitor(sv, e);
+    else if (fstate.sub === 1) {
+      monController = startMonitor(
+        sv,
+        e,
+        (i) => {
+          fstate.row = "content";
+          clearNavFocus();
+          fstate.cidx = i;
+          updateContentFocus();
+          monController.setMetric(i);
+        },
+        (cards) => {
+          focusContentList = cards;
+          if (fstate.row === "content") updateContentFocus();
+        }
+      );
+    }
     else sv.innerHTML = vmOps();
   }
   bindSubView(sv);
@@ -241,12 +283,8 @@ function bindSubView(sv) {
   focusContentList = [];
   const isMonitor = fstate.currentEntity && fstate.sub === 1 && monController;
   if (isMonitor) {
-    const cards = monController.cards();
-    focusContentList = cards;
-    cards.forEach((c, i) => {
-      c.addEventListener("click", () => { fstate.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); monController.setMetric(i); });
-      c.addEventListener("mouseenter", () => { if (fstate.cidx !== i || fstate.row !== "content") { fstate.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); monController.setMetric(i); } });
-    });
+    // 监控卡片点击/悬停由 monitor.startMonitor 内部绑定；此处仅同步当前卡片
+    focusContentList = monController.cards();
     if (fstate.row === "content") updateContentFocus();
     return;
   }
@@ -256,12 +294,12 @@ function bindSubView(sv) {
     const snaps = [...sv.querySelectorAll("#vm-snapshots .vrow")];
     focusContentList = [...ops, ...snaps];
     ops.forEach((b, i) => {
-      b.addEventListener("click", () => { focus.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); doAction(b.dataset.op); });
-      b.addEventListener("mouseenter", () => { if (fstate.cidx !== i || focus.row !== "content") { focus.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); } });
+      b.addEventListener("click", () => { fstate.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); doAction(b.dataset.op); });
+      b.addEventListener("mouseenter", () => { if (fstate.cidx !== i || fstate.row !== "content") { fstate.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); } });
     });
     snaps.forEach((r, i) => {
-      r.addEventListener("click", () => { focus.row = "content"; clearNavFocus(); fstate.cidx = ops.length + i; updateContentFocus(); snapshotAction(snapshots[i]); });
-      r.addEventListener("mouseenter", () => { const ci = ops.length + i; if (fstate.cidx !== ci || focus.row !== "content") { focus.row = "content"; clearNavFocus(); fstate.cidx = ci; updateContentFocus(); } });
+      r.addEventListener("click", () => { fstate.row = "content"; clearNavFocus(); fstate.cidx = ops.length + i; updateContentFocus(); snapshotAction(snapshots[i]); });
+      r.addEventListener("mouseenter", () => { const ci = ops.length + i; if (fstate.cidx !== ci || fstate.row !== "content") { fstate.row = "content"; clearNavFocus(); fstate.cidx = ci; updateContentFocus(); } });
     });
     // 仅内容态时恢复内容高亮（导航态下保持 subnav 单一高亮）
     if (fstate.row === "content") updateContentFocus();
@@ -284,8 +322,14 @@ function renderSnapshots() {
   });
 }
 
+function currentContentList() {
+  // 监控视图：卡片异步就绪，动态查询，避免缓存空列表
+  if (fstate.sub === 1 && monController) return monController.cards();
+  return focusContentList;
+}
+
 function updateContentFocus() {
-  focusContentList.forEach((el, i) => el.classList.toggle("focused", i === fstate.cidx));
+  currentContentList().forEach((el, i) => el.classList.toggle("focused", i === fstate.cidx));
 }
 
 // 清理二级导航的高亮（导航 ⇄ 内容 互斥）
@@ -299,7 +343,7 @@ function hasFocusableContent() {
 }
 
 function triggerContent(i) {
-  const el = focusContentList[i];
+  const el = currentContentList()[i];
   if (!el) return;
   el.click();
 }
@@ -398,8 +442,8 @@ function entityKey(e) {
     }
     if (e.key === "Enter" || e.key === "ArrowDown") {
       if (hasFocusableContent()) {
-        focus.row = "content";
-        focus.cidx = 0;
+        fstate.row = "content";
+        fstate.cidx = 0;
         clearNavFocus();
         updateContentFocus();
         if (fstate.sub === 1 && monController) monController.setMetric(fstate.cidx);
@@ -407,12 +451,13 @@ function entityKey(e) {
       return true;
     }
     if (e.key === "Escape") { backToList(); return true; }
-    return true;
+    return false; // 其余键（Home 等）交给全局状态机
   }
   // content
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-    if (focusContentList.length) {
-      fstate.cidx = (fstate.cidx + (e.key === "ArrowRight" ? 1 : -1) + focusContentList.length) % focusContentList.length;
+    const list = currentContentList();
+    if (list.length) {
+      fstate.cidx = (fstate.cidx + (e.key === "ArrowRight" ? 1 : -1) + list.length) % list.length;
       updateContentFocus();
       // 监控视图：同步切换曲线指标
       if (fstate.sub === 1 && monController) monController.setMetric(fstate.cidx);
@@ -425,7 +470,7 @@ function entityKey(e) {
     renderEntity();
     return true;
   }
-  return true;
+  return false;
 }
 
 export default {

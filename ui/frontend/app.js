@@ -23,6 +23,9 @@ const state = {
   current: null,
 };
 
+// 测试插桩：暴露全局导航状态供 VIRTCONSOLE_TEST 驱动断言
+window.__vcAppState = () => ({ tabbarFocus: state.tabbarFocus, current: state.current });
+
 const mounted = new Map();
 
 /* ===== Tab 栏渲染 ===== */

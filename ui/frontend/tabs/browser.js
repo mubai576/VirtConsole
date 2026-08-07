@@ -5,6 +5,9 @@ let browserFocus = "addr"; // addr | quick | tabs
 let browserSel = 0;
 let browserTabs = [];
 
+// 测试插桩：暴露浏览器焦点状态供 VIRTCONSOLE_TEST 驱动断言
+window.__vcBrowser = () => ({ focus: browserFocus, sel: browserSel, tabs: browserTabs.length });
+
 function blurAddr() {
   if (browserFocus !== "addr") $("#browser-addr")?.blur();
 }

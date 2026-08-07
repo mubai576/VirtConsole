@@ -214,14 +214,27 @@ async fn pve_connect(
     state: tauri::State<'_, PveState>,
 ) -> Result<String, String> {
     let cfg = config::load(&app);
-    let auth = cfg.pve.clone().unwrap_or_else(|| config::PveAuth {
-        method: "token".into(),
-        host: "mock://".into(),
-        node: "pve".into(),
-        token: None,
-        username: None,
-        password: None,
-    });
+    // 测试模式默认强制 mock 后端（离线确定性；设置 VIRTCONSOLE_TEST_REAL=1 走真实 PVE）
+    let use_mock = testmode::enabled() && std::env::var("VIRTCONSOLE_TEST_REAL").is_err();
+    let auth = if use_mock {
+        config::PveAuth {
+            method: "token".into(),
+            host: "mock://".into(),
+            node: "pve".into(),
+            token: None,
+            username: None,
+            password: None,
+        }
+    } else {
+        cfg.pve.clone().unwrap_or_else(|| config::PveAuth {
+            method: "token".into(),
+            host: "mock://".into(),
+            node: "pve".into(),
+            token: None,
+            username: None,
+            password: None,
+        })
+    };
     let mut cli = pve::PveClient::new(&auth);
     let msg = cli.connect().await?;
     *state.client.lock().await = Some(cli);

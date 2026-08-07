@@ -27,7 +27,7 @@ const f1 = (v) => (v == null ? "--" : v.toFixed(2));
  * @param entity { kind: "host"|"vm", vmid? }
  * @returns { move(dir), stop() }
  */
-export function startMonitor(container, entity) {
+export function startMonitor(container, entity, onSelect, onCards) {
   const kind = entity.kind;
   const list = METRICS[kind] || [];
   let metric = 0;
@@ -73,7 +73,9 @@ export function startMonitor(container, entity) {
       netout: last.netout,
       io: last.io,
     };
-    // 稳定元素：只更新值/高亮，不重建 DOM（保持外部焦点元素引用有效）
+    // 稳定元素：只更新值/选中态，不重建 DOM（保持外部焦点元素引用有效）
+    // 注意：选中态用 .selected（无焦点环），实际焦点 .focused 由 vm.js 控制，
+    // 避免轮询刷新时重加 .focused 造成跨 Tab 残留高亮。
     while (wrap.children.length < list.length) {
       const card = document.createElement("div");
       card.className = "info-cell mon-card";
@@ -82,11 +84,19 @@ export function startMonitor(container, entity) {
     }
     list.forEach((m, i) => {
       const card = wrap.children[i];
-      card.classList.toggle("focused", i === metric);
+      card.classList.toggle("selected", i === metric);
       card.querySelector(".k").textContent = m.label;
       card.querySelector(".v").textContent = m.fmt(values[m.key]);
+      // 点击/悬停选中（仅绑定一次，卡片稳定复用）
+      if (!card.dataset.bound) {
+        card.dataset.bound = "1";
+        card.addEventListener("click", () => onSelect && onSelect(i));
+        card.addEventListener("mouseenter", () => onSelect && onSelect(i));
+      }
     });
     while (wrap.children.length > list.length) wrap.lastChild.remove();
+    // 通知外部焦点列表已就绪（异步加载卡片后同步）
+    if (onCards) onCards(list.map((_, i) => wrap.children[i]));
   }
 
   function draw() {
