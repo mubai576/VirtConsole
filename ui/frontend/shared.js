@@ -56,6 +56,20 @@ mqLight.addEventListener("change", () => {
   if (getThemeMode() === "system") applyTheme("system");
 });
 
+/* ===== UI 缩放（分辨率基准）与画面采集缩放 ===== */
+// 样式为 px 体系，用 zoom 整体缩放（WebView2 / WebKitGTK 均支持）
+const SCALE_ZOOM = { auto: 1, "720p": 0.875, "1080p": 1, "2k": 1.15, "4k": 1.35 };
+
+export function applyScale(scale) {
+  document.documentElement.style.zoom = SCALE_ZOOM[scale] || 1;
+}
+
+export function applyCaptureScale(scale) {
+  const canvas = $("#vm-canvas");
+  if (!canvas) return;
+  canvas.style.objectFit = scale === "fill" ? "fill" : scale === "original" ? "none" : "contain";
+}
+
 /* ===== VM 控制台（沉浸层，复用 QMP 链路） ===== */
 let consoleActive = false;
 const pressedKeys = new Set();
@@ -289,6 +303,25 @@ export function showInput({ title, initial = "", kind = "text", confirmText = "�
   });
 }
 
+/** 只读信息对话框（items: [{label, value}]），Enter/Esc/按钮 关闭 */
+export function showInfoModal({ title, items }) {
+  const rows = items
+    .map((it) => `<div class="info-cell"><div class="k">${it.label}</div><div class="v" style="font-size:15px;">${it.value}</div></div>`)
+    .join("");
+  const ov = openModal(
+    `<div class="modal-title">${title}</div>` +
+      `<div class="info-grid" style="margin-top:16px;max-height:340px;overflow-y:auto;">${rows}</div>` +
+      `<div class="modal-btns"><button class="btn btn-primary">关闭</button></div>`
+  );
+  const done = () => ov.remove();
+  const onKey = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); done(); }
+  };
+  ov.addEventListener("keydown", onKey, true);
+  ov.querySelector("button").addEventListener("click", done);
+}
+
 /**
  * 表单对话框（多个字段一次填写）→ Promise<{key:value} | null>
  * fields: [{ key, label, kind: "text"|"password"|"select", initial, required, options?:[{label,value}],
@@ -428,13 +461,10 @@ export function showForm({ title, fields, confirmText = "保存" }) {
       }
       if (e.key === "ArrowDown" || e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
-        // Enter：最后一项且为输入框才提交；select 上 Enter 不提交（避免误确认）
-        if (e.key === "Enter") {
-          const last = visibleRows()[fi];
-          if (fi >= list.length - 1 && (!last || last.type !== "select")) {
-            submit();
-            return;
-          }
+        // Enter：最后一项（含 select）→ 提交；否则下移。←→ 用于 select 选值。
+        if (e.key === "Enter" && fi >= list.length - 1) {
+          submit();
+          return;
         }
         focusIdx(fi + 1);
         return;

@@ -56,11 +56,22 @@ pub async fn connect(app: AppHandle, state: &QmpState, vmid: u32) -> Result<Stri
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_focus();
     }
-    let task = tokio::spawn(capture_loop(app.clone(), state.client.clone(), state.capture_on.clone()));
+    let fps = capture_fps(&app);
+    let task = tokio::spawn(capture_loop(
+        app.clone(),
+        state.client.clone(),
+        state.capture_on.clone(),
+        fps,
+    ));
     *state.capture_task.lock().await = Some(task);
 
     emit_status(&app, "connected", &format!("VM {vmid} 已连接"));
     Ok(format!("已连接 VM {vmid}"))
+}
+
+/// 采集帧率：读 config.capture_fps（1..30）
+fn capture_fps(app: &AppHandle) -> u32 {
+    crate::config::load(app).capture_fps.clamp(1, 30)
 }
 
 pub async fn disconnect(state: &QmpState) {
@@ -107,8 +118,10 @@ async fn capture_loop(
     app: AppHandle,
     client: Arc<Mutex<Option<QmpClient>>>,
     capture_on: Arc<AtomicBool>,
+    fps: u32,
 ) {
     let path = "/dev/shm/vc-live.ppm".to_string();
+    let interval = Duration::from_millis((1000.0 / fps as f64).max(30.0) as u64);
     let mut last: Option<Vec<u8>> = None;
     let mut error_shown = false;
     let mut first_frame = true;
@@ -125,7 +138,7 @@ async fn capture_loop(
         match frame {
             Ok(f) => {
                 if first_frame {
-                    eprintln!("[QMP] 采集开始：{}x{}", f.width, f.height);
+                    eprintln!("[QMP] 采集开始：{}x{} @{fps}fps", f.width, f.height);
                     first_frame = false;
                 }
                 error_shown = false;
@@ -146,6 +159,6 @@ async fn capture_loop(
                 }
             }
         }
-        sleep(Duration::from_millis(100)).await;
+        sleep(interval).await;
     }
 }

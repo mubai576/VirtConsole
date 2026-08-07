@@ -1,18 +1,23 @@
 // 设置：主题 / 分辨率 / 采集 / PVE / 开机直连 / 系统信息 / 关于
-// P1 实现主题（可切换）+ 系统信息；P2 实现 PVE 连接配置（单表单弹窗）；其余 P5 接入 config 持久化
 import {
   $, toast, setCrumb, setHint, invoke,
-  getThemeMode, setThemeMode, showForm, showInput,
+  getThemeMode, setThemeMode, showForm, showInput, showInfoModal,
+  applyScale, applyCaptureScale,
 } from "../shared.js";
 
 const THEME_LABELS = { dark: "深色", light: "浅色", system: "跟随系统" };
 const THEME_ORDER = ["dark", "light", "system"];
+const SCALE_LABELS = { auto: "自动（适配屏幕）", "720p": "720p", "1080p": "1080p", "2k": "2K", "4k": "4K" };
+const CAP_SCALE_LABELS = { fit: "适配屏幕", fill: "拉伸铺满", original: "原始尺寸" };
 
 let ctx = null;
 let rows = [];
 let focusIndex = 0;
 let pveHost = null;
 let autoconnectVmid = null;
+let uiScale = "auto";
+let captureFps = 10;
+let captureScale = "fit";
 
 function pveHostText() {
   return pveHost || "未配置";
@@ -87,12 +92,12 @@ function mount(el, appCtx) {
         render();
       },
     },
-    { label: "显示分辨率", value: () => "1920×1080（P5 可配置）", enter: () => toast("分辨率设置（P5 接入）") },
-    { label: "画面采集", value: () => "帧率 10fps · 适配屏幕（P5 可配置）", enter: () => toast("画面采集设置（P5 接入）") },
+    { label: "显示分辨率", value: () => (SCALE_LABELS[uiScale] || uiScale), enter: () => configUiScale() },
+    { label: "画面采集", value: () => `${captureFps} fps · ${CAP_SCALE_LABELS[captureScale] || captureScale}`, enter: () => configCapture() },
     { label: "PVE 连接", value: () => pveHostText(), enter: () => configPve() },
     { label: "开机直连", value: () => (autoconnectVmid ? `VM ${autoconnectVmid}` : "关闭"), enter: () => configAutoconnect() },
     { label: "手机遥控", value: () => "V1.0 未实现 · 设计保留", enter: () => toast("手机遥控（V1.0 不实现）") },
-    { label: "系统信息", value: () => "v0.1.0", enter: () => showInfo() },
+    { label: "系统信息", value: () => "版本 / 平台 / 采集 / 连接", enter: () => showInfoDialog() },
     { label: "关于", value: () => "VirtConsole 自研 PVE 终端", enter: () => toast("VirtConsole · 自研 PVE 一体化 HDMI 终端") },
   ];
 
@@ -110,11 +115,14 @@ function mount(el, appCtx) {
   setHint("↑↓ 选择 · Enter 确认 · Esc 返回");
   render();
 
-  // 读取已持久化的 PVE 连接与开机直连
+  // 读取已持久化的配置（PVE / 开机直连 / 分辨率 / 采集）
   invoke("get_config")
     .then((cfg) => {
       if (cfg.pve && cfg.pve.host) pveHost = cfg.pve.host;
       if (cfg.autoconnect_vmid) autoconnectVmid = cfg.autoconnect_vmid;
+      if (cfg.ui_scale) uiScale = cfg.ui_scale;
+      if (cfg.capture_fps) captureFps = cfg.capture_fps;
+      if (cfg.capture_scale) captureScale = cfg.capture_scale;
       render();
     })
     .catch(() => {});
@@ -144,13 +152,94 @@ async function configAutoconnect() {
   }
 }
 
-async function showInfo() {
+async function configUiScale() {
+  const res = await showForm({
+    title: "显示分辨率（UI 缩放）",
+    fields: [
+      {
+        key: "scale",
+        label: "分辨率基准",
+        kind: "select",
+        options: [
+          { label: "自动（适配屏幕）", value: "auto" },
+          { label: "720p", value: "720p" },
+          { label: "1080p", value: "1080p" },
+          { label: "2K", value: "2k" },
+          { label: "4K", value: "4k" },
+        ],
+      },
+    ],
+    confirmText: "应用",
+  });
+  if (!res) return;
   try {
-    const info = await invoke("app_info");
-    toast(`VirtConsole v${info.version} · ${info.platform}/${info.arch}`);
-  } catch {
-    toast("无法读取系统信息");
+    await invoke("set_ui_scale", { scale: res.scale });
+    uiScale = res.scale;
+    applyScale(res.scale);
+    toast("分辨率已应用：" + (SCALE_LABELS[res.scale] || res.scale));
+    render();
+  } catch (e) {
+    toast("设置失败: " + e);
   }
+}
+
+async function configCapture() {
+  const res = await showForm({
+    title: "画面采集",
+    fields: [
+      {
+        key: "fps",
+        label: "采集帧率",
+        kind: "select",
+        options: [
+          { label: "5 fps", value: "5" },
+          { label: "10 fps", value: "10" },
+          { label: "15 fps", value: "15" },
+        ],
+      },
+      {
+        key: "scale",
+        label: "画面缩放",
+        kind: "select",
+        options: [
+          { label: "适配屏幕", value: "fit" },
+          { label: "拉伸铺满", value: "fill" },
+          { label: "原始尺寸", value: "original" },
+        ],
+      },
+    ],
+    confirmText: "应用",
+  });
+  if (!res) return;
+  try {
+    const fps = Number(res.fps);
+    await invoke("set_capture", { fps, scale: res.scale });
+    captureFps = fps;
+    captureScale = res.scale;
+    applyCaptureScale(res.scale);
+    toast(`采集设置已应用（下次连接控制台生效帧率）`);
+    render();
+  } catch (e) {
+    toast("设置失败: " + e);
+  }
+}
+
+async function showInfoDialog() {
+  const info = await invoke("app_info").catch(() => null);
+  const cfg = await invoke("get_config").catch(() => null);
+  const pve = cfg && cfg.pve && cfg.pve.host ? `${cfg.pve.host}（${cfg.pve.method}）` : "未配置";
+  showInfoModal({
+    title: "系统信息",
+    items: [
+      { label: "版本", value: info ? `v${info.version}` : "--" },
+      { label: "平台", value: info ? `${info.platform}/${info.arch}` : "--" },
+      { label: "主题", value: THEME_LABELS[getThemeMode()] },
+      { label: "分辨率", value: SCALE_LABELS[uiScale] || uiScale },
+      { label: "采集", value: `${captureFps} fps · ${CAP_SCALE_LABELS[captureScale] || captureScale}` },
+      { label: "PVE 连接", value: pve },
+      { label: "开机直连", value: autoconnectVmid ? `VM ${autoconnectVmid}` : "关闭" },
+    ],
+  });
 }
 
 export default {

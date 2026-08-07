@@ -9,7 +9,7 @@
 
 import { TABS } from "./tabs/index.js";
 import {
-  $, toast, invoke, enterConsole, applyTheme,
+  $, toast, invoke, enterConsole, applyTheme, applyScale, applyCaptureScale,
   isConsoleActive, exitConsole, consoleKeyDown, consoleKeyUp,
   drawFrame, setConnState,
 } from "./shared.js";
@@ -181,12 +181,16 @@ window.__TAURI__.event.listen("pve-status", (ev) => {
 function boot() {
   renderTabbar();
   activate("home");
-  // 应用持久化主题（config 为权威源，覆盖 localStorage 快速缓存）
+  // 应用持久化主题 + UI 缩放 + 采集缩放（config 为权威源）
   invoke("get_config")
     .then((cfg) => {
       if (cfg && cfg.theme) {
         localStorage.setItem("vc-theme", cfg.theme);
         applyTheme(cfg.theme);
+      }
+      if (cfg) {
+        applyScale(cfg.ui_scale);
+        applyCaptureScale(cfg.capture_scale);
       }
     })
     .catch(() => {});
