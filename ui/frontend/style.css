@@ -643,8 +643,24 @@ html, body {
 .mon-chart canvas { width: 100%; height: 220px; display: block; }
 
 /* ===== 终端视图 ===== */
+.term-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.term-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 2px;
+}
+.term-exit {
+  padding: 8px 18px;
+  font-size: 14px;
+}
 .term-wrap {
-  height: 440px;
+  height: 420px;
   background: #0d0d12;
   border: 1px solid var(--divider);
   border-radius: var(--radius-card);

@@ -43,10 +43,17 @@ export function startTerminal(container) {
   }
 
   container.innerHTML = `
+    <div class="term-head">
+      <span class="term-title">宿主机终端</span>
+      <button class="btn btn-ghost term-exit">退出终端</button>
+    </div>
     <div class="term-wrap" id="term-wrap"></div>
-    <div class="browser-hint">Ctrl+Alt+Q 退出终端</div>
+    <div class="browser-hint">Ctrl+Alt+Q 退出终端 · 也可点击右上角"退出终端"</div>
   `;
   const wrap = container.querySelector("#term-wrap");
+
+  // 退出按钮（鼠标可达，不依赖按键路由）
+  container.querySelector(".term-exit").addEventListener("click", () => handleTermExit());
 
   const t = new window.Terminal({
     fontSize: 15,
@@ -58,6 +65,14 @@ export function startTerminal(container) {
       cursor: "#0a84ff",
       selectionBackground: "rgba(10,132,255,.3)",
     },
+  });
+  // 在 xterm 层拦截 Ctrl+Alt+Q：即使 DOM 冒泡被吞也能退出
+  t.attachCustomKeyEventHandler((e) => {
+    if (e.type === "keydown" && e.ctrlKey && e.altKey && (e.key === "q" || e.key === "Q")) {
+      handleTermExit();
+      return false; // 不交给 xterm 写入 PTY
+    }
+    return true;
   });
   t.open(wrap);
   const cols = Math.max(40, Math.floor(wrap.clientWidth / 9) || 40);

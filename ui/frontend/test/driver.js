@@ -452,6 +452,18 @@ async function suiteE() {
     assert(!!q(".xterm"), "方向键干扰了导航/终端");
     await goHome();
   });
+  await step("E7_exit_button", async () => {
+    await openVmEntity(0, 2);
+    await wait(300);
+    assert(!!q(".xterm"), "终端未启动");
+    const btn = q(".term-exit");
+    assert(!!btn, "退出按钮缺失");
+    click(btn);
+    await flush(200);
+    assert(!q(".xterm"), "点退出按钮未关闭终端");
+    assert(!!q(".subnav-item"), "退出后未回实体页");
+    await goHome();
+  });
 }
 
 // ===== F. 浏览器 =====
