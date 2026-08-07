@@ -638,3 +638,14 @@ html, body {
   padding: 12px;
 }
 .mon-chart canvas { width: 100%; height: 220px; display: block; }
+
+/* ===== 终端视图 ===== */
+.term-wrap {
+  height: 440px;
+  background: #0d0d12;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  padding: 10px;
+  overflow: hidden;
+}
+.term-wrap .xterm { height: 100%; }

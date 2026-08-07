@@ -13,6 +13,7 @@ import {
   isConsoleActive, exitConsole, consoleKeyDown, consoleKeyUp,
   drawFrame, setConnState,
 } from "./shared.js";
+import { handleTermExit } from "./terminal.js";
 
 const tabbar = $("#tabbar");
 const content = $("#content");
@@ -110,6 +111,7 @@ function tabbarKey(e) {
 
 /* ===== 全局退出（Ctrl+Alt+Q） ===== */
 async function globalExit() {
+  if (handleTermExit()) return; // 终端激活：退出终端
   if (isConsoleActive()) {
     exitConsole();
     return;

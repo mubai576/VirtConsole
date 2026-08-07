@@ -10,11 +10,13 @@ mod browser;
 mod config;
 mod pve;
 mod qmp;
+mod terminal;
 
 use std::sync::Arc;
 
 use browser::BrowserState;
 use qmp::QmpState;
+use terminal::TermState;
 use tokio::sync::Mutex;
 
 /// PVE 客户端状态（单连接，串行化复用）
@@ -340,12 +342,48 @@ async fn pve_gpu_metrics() -> Option<pve::GpuMetrics> {
     pve::PveClient::gpu_metrics().await
 }
 
+// ===== 终端 =====
+
+#[tauri::command]
+async fn term_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, TermState>,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    terminal::start(app, &state, rows, cols).await
+}
+
+#[tauri::command]
+async fn term_stop(state: tauri::State<'_, TermState>) -> Result<(), String> {
+    terminal::stop(&state).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn term_input(
+    state: tauri::State<'_, TermState>,
+    data: String,
+) -> Result<(), String> {
+    terminal::input(&state, data).await
+}
+
+#[tauri::command]
+async fn term_resize(
+    state: tauri::State<'_, TermState>,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    terminal::resize(&state, rows, cols).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(QmpState::default())
         .manage(BrowserState::default())
         .manage(PveState::default())
+        .manage(TermState::default())
         .setup(|app| {
             // 验证/演示钩子：VIRTCONSOLE_BROWSER_AUTOOPEN 指定启动后自动打开的网址
             if let Ok(url) = std::env::var("VIRTCONSOLE_BROWSER_AUTOOPEN") {
@@ -388,6 +426,10 @@ pub fn run() {
             pve_vm_live,
             pve_vm_rrd,
             pve_gpu_metrics,
+            term_start,
+            term_stop,
+            term_input,
+            term_resize,
             browser_open,
             browser_close,
             browser_close_all,

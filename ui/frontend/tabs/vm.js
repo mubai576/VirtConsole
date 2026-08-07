@@ -6,6 +6,7 @@ import {
   takeVmTarget, fmtBytes, fmtPct,
 } from "../shared.js";
 import { startMonitor } from "../monitor.js";
+import { startTerminal, disposeTerminal, setTermExitHandler } from "../terminal.js";
 
 let ctx = null;
 let entities = [];
@@ -14,6 +15,7 @@ let snapshots = [];
 let focusContentList = [];
 let listRowEls = [];
 let monController = null;
+let termActive = false;
 
 const fstate = { mode: "list", idx: 0, sub: 0, row: "nav", cidx: 0 };
 const SUB_VM = ["概览", "监控", "操作"];
@@ -127,6 +129,7 @@ function openEntity(e) {
 
 function backToList() {
   if (monController) { monController.stop(); monController = null; }
+  stopTerminal();
   fstate.mode = "list";
   fstate.currentEntity = null;
   fstate.idx = Math.min(fstate.idx, Math.max(0, entities.length - 1));
@@ -161,19 +164,39 @@ function renderEntity() {
 function renderSubView() {
   const sv = $("#vm-subview");
   if (!sv) return;
-  // 停止旧监控轮询（每次重建子视图前）
+  // 停止旧监控/终端（每次重建子视图前）
   if (monController) { monController.stop(); monController = null; }
+  stopTerminal();
   const e = fstate.currentEntity;
   if (e.kind === "host") {
     if (fstate.sub === 0) sv.innerHTML = hostOverview();
     else if (fstate.sub === 1) monController = startMonitor(sv, e);
-    else sv.innerHTML = placeholder("💻", "宿主机终端", "P4 接入：xterm.js + Rust PTY（宿主机 Bash）。");
+    else {
+      startTerminal(sv);
+      termActive = true;
+      setTermExitHandler(() => exitTerminal());
+    }
   } else {
     if (fstate.sub === 0) sv.innerHTML = detail ? vmOverview() : placeholder("⏳", "加载中", "正在读取 VM 配置…");
     else if (fstate.sub === 1) monController = startMonitor(sv, e);
     else sv.innerHTML = vmOps();
   }
   bindSubView(sv);
+}
+
+// 终端退出（Ctrl+Alt+Q 触发）：销毁会话并回到实体页概览
+function exitTerminal() {
+  termActive = false;
+  stopTerminal();
+  fstate.sub = 0;
+  fstate.row = "nav";
+  renderEntity();
+}
+
+function stopTerminal() {
+  termActive = false;
+  disposeTerminal();
+  setTermExitHandler(null);
 }
 
 function placeholder(icon, title, desc) {
@@ -412,11 +435,14 @@ export default {
   focus,
   blur() {
     if (monController) { monController.stop(); monController = null; }
+    stopTerminal();
     listRowEls.forEach((el) => el.classList.remove("focused"));
     focusContentList.forEach((el) => el.classList.remove("focused"));
     document.querySelectorAll(".subnav-item").forEach((el) => el.classList.remove("focused"));
   },
   onKey(e) {
+    // 终端激活：所有按键交给 xterm（Ctrl+Alt+Q 由全局处理退出）
+    if (termActive) return true;
     if (fstate.mode === "list") {
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         if (entities.length) {
@@ -436,6 +462,7 @@ export default {
   },
   unmount() {
     if (monController) { monController.stop(); monController = null; }
+    stopTerminal();
   },
 };
 
