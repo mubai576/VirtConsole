@@ -407,6 +407,12 @@ fn test_mode() -> bool {
     testmode::enabled()
 }
 
+/// 要运行的测试套件（VIRTCONSOLE_TEST_SUITES，逗号分隔 id；缺省 "*" 全部）
+#[tauri::command]
+fn test_suites() -> String {
+    std::env::var("VIRTCONSOLE_TEST_SUITES").unwrap_or_else(|_| "*".into())
+}
+
 #[tauri::command]
 fn test_report(app: tauri::AppHandle, results: Vec<TestResult>) {
     testmode::report_received();
@@ -481,6 +487,7 @@ pub fn run() {
             term_input,
             term_resize,
             test_mode,
+            test_suites,
             test_report,
             browser_open,
             browser_close,
