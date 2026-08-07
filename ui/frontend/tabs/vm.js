@@ -20,9 +20,6 @@ const SUB_HOST = ["概览", "监控", "终端"];
 function subNav() {
   return fstate.currentEntity?.kind === "host" ? SUB_HOST : SUB_VM;
 }
-function currentEntity() {
-  return fstate.currentEntity;
-}
 
 function statusBadge(st) {
   const map = { running: "running", paused: "paused", stopped: "stopped", "pre-start": "starting", "post-start": "starting", migrating: "starting" };
@@ -63,10 +60,12 @@ async function refresh() {
   } catch {
     entities = [];
   }
-  if (fstate.mode === "list") renderList();
-  else if (fstate.currentEntity) {
-    renderEntity();
+  if (fstate.mode === "list") {
+    renderList();
+  } else if (fstate.currentEntity) {
+    // 实体态：仅刷新当前实体数据并重渲染一次（loadDetail 内部 renderEntity）
     if (fstate.currentEntity.kind === "vm") loadDetail();
+    else renderEntity();
   }
 }
 

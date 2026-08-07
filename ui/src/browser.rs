@@ -101,7 +101,8 @@ pub fn close(app: &AppHandle, state: &BrowserState, label: String) -> Result<(),
     Ok(())
 }
 
-pub fn close_all(app: &AppHandle, state: &BrowserState) -> Result<(), String> {
+/// 关闭全部标签页，返回关闭数量（供前端判断是否需要提示）。
+pub fn close_all(app: &AppHandle, state: &BrowserState) -> Result<usize, String> {
     let labels: Vec<String> = state
         .tabs
         .lock()
@@ -109,6 +110,7 @@ pub fn close_all(app: &AppHandle, state: &BrowserState) -> Result<(), String> {
         .iter()
         .map(|t| t.label.clone())
         .collect();
+    let n = labels.len();
     for label in labels {
         if let Some(w) = app.get_webview_window(&label) {
             let _ = w.close();
@@ -116,7 +118,7 @@ pub fn close_all(app: &AppHandle, state: &BrowserState) -> Result<(), String> {
     }
     state.tabs.lock().unwrap().clear();
     emit_tabs(app, state);
-    Ok(())
+    Ok(n)
 }
 
 pub fn focus(app: &AppHandle, label: String) -> Result<(), String> {

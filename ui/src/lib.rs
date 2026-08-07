@@ -40,9 +40,12 @@ fn app_info() -> serde_json::Value {
     })
 }
 
-/// 开机直连目标（VIRTCONSOLE_AUTOCONNECT_VMID 环境变量），由前端加载完成后查询。
+/// 开机直连目标：优先 config.autoconnect_vmid，回退 VIRTCONSOLE_AUTOCONNECT_VMID 环境变量。
 #[tauri::command]
-fn boot_vmid() -> Option<u32> {
+fn boot_vmid(app: tauri::AppHandle) -> Option<u32> {
+    if let Some(v) = config::load(&app).autoconnect_vmid {
+        return Some(v);
+    }
     std::env::var("VIRTCONSOLE_AUTOCONNECT_VMID")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -70,7 +73,7 @@ fn browser_close(
 fn browser_close_all(
     app: tauri::AppHandle,
     state: tauri::State<'_, BrowserState>,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     browser::close_all(&app, &state)
 }
 

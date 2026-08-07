@@ -48,6 +48,14 @@ pub struct PveClient {
     ticket: Option<String>,
     csrf: Option<String>,
     version: String,
+    http: reqwest::Client,
+}
+
+fn build_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .danger_accept_invalid_certs(true) // PVE 自签证书
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 impl PveClient {
@@ -59,6 +67,7 @@ impl PveClient {
             ticket: None,
             csrf: None,
             version: String::new(),
+            http: build_client(),
         }
     }
 
@@ -237,18 +246,11 @@ impl PveClient {
 
     // ===== 底层 HTTP =====
 
-    async fn client(&self) -> reqwest::Client {
-        reqwest::Client::builder()
-            .danger_accept_invalid_certs(true) // PVE 自签证书
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    }
-
     async fn get(&self, path: &str) -> Result<Value, String> {
         if self.is_mock() {
             return self.mock(path).await;
         }
-        let mut rb = self.client().await.get(&format!("{}{}", self.base, path));
+        let mut rb = self.http.get(&format!("{}{}", self.base, path));
         if let Some(t) = &self.ticket {
             rb = rb.header("Cookie", format!("PVEAuthCookie={t}"));
         }
@@ -265,8 +267,7 @@ impl PveClient {
             return self.mock(path).await;
         }
         let mut rb = self
-            .client()
-            .await
+            .http
             .post(&format!("{}{}", self.base, path))
             .json(&body);
         if let Some(t) = &self.ticket {
@@ -290,8 +291,7 @@ impl PveClient {
             return self.mock(path).await;
         }
         let mut rb = self
-            .client()
-            .await
+            .http
             .delete(&format!("{}{}", self.base, path));
         if let Some(t) = &self.ticket {
             rb = rb.header("Cookie", format!("PVEAuthCookie={t}"));
@@ -312,8 +312,7 @@ impl PveClient {
     /// 无鉴权裸 POST（登录取 ticket 用）
     async fn raw_post_plain(&self, path: &str, body: Value) -> Result<Value, String> {
         let resp = self
-            .client()
-            .await
+            .http
             .post(&format!("{}{}", self.base, path))
             .json(&body)
             .send()

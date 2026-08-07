@@ -2,7 +2,7 @@
 // P1 实现主题（可切换）+ 系统信息；P2 实现 PVE 连接配置（单表单弹窗）；其余 P5 接入 config 持久化
 import {
   $, toast, setCrumb, setHint, invoke,
-  getThemeMode, setThemeMode, showForm,
+  getThemeMode, setThemeMode, showForm, showInput,
 } from "../shared.js";
 
 const THEME_LABELS = { dark: "深色", light: "浅色", system: "跟随系统" };
@@ -12,6 +12,7 @@ let ctx = null;
 let rows = [];
 let focusIndex = 0;
 let pveHost = null;
+let autoconnectVmid = null;
 
 function pveHostText() {
   return pveHost || "未配置";
@@ -89,7 +90,7 @@ function mount(el, appCtx) {
     { label: "显示分辨率", value: () => "1920×1080（P5 可配置）", enter: () => toast("分辨率设置（P5 接入）") },
     { label: "画面采集", value: () => "帧率 10fps · 适配屏幕（P5 可配置）", enter: () => toast("画面采集设置（P5 接入）") },
     { label: "PVE 连接", value: () => pveHostText(), enter: () => configPve() },
-    { label: "开机直连", value: () => "VM 9000", enter: () => toast("开机直连设置（P5 接入）") },
+    { label: "开机直连", value: () => (autoconnectVmid ? `VM ${autoconnectVmid}` : "关闭"), enter: () => configAutoconnect() },
     { label: "手机遥控", value: () => "V1.0 未实现 · 设计保留", enter: () => toast("手机遥控（V1.0 不实现）") },
     { label: "系统信息", value: () => "v0.1.0", enter: () => showInfo() },
     { label: "关于", value: () => "VirtConsole 自研 PVE 终端", enter: () => toast("VirtConsole · 自研 PVE 一体化 HDMI 终端") },
@@ -109,13 +110,38 @@ function mount(el, appCtx) {
   setHint("↑↓ 选择 · Enter 确认 · Esc 返回");
   render();
 
-  // 读取已持久化的 PVE 连接（host）
+  // 读取已持久化的 PVE 连接与开机直连
   invoke("get_config")
     .then((cfg) => {
       if (cfg.pve && cfg.pve.host) pveHost = cfg.pve.host;
+      if (cfg.autoconnect_vmid) autoconnectVmid = cfg.autoconnect_vmid;
       render();
     })
     .catch(() => {});
+}
+
+async function configAutoconnect() {
+  const v = await showInput({
+    title: "开机直连 VMID（留空表示关闭）",
+    initial: autoconnectVmid ? String(autoconnectVmid) : "",
+    kind: "text",
+  });
+  if (v == null) return;
+  const s = v.trim();
+  let vmid = null;
+  if (s) {
+    const n = Number(s);
+    if (!Number.isInteger(n) || n <= 0) { toast("VMID 无效"); return; }
+    vmid = n;
+  }
+  try {
+    await invoke("set_autoconnect", { vmid });
+    autoconnectVmid = vmid;
+    toast(vmid ? `开机直连 VM ${vmid}` : "已关闭开机直连");
+    render();
+  } catch (err) {
+    toast("设置失败: " + err);
+  }
 }
 
 async function showInfo() {

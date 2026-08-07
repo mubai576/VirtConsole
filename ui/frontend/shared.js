@@ -43,6 +43,8 @@ export function getThemeMode() {
 export function setThemeMode(mode) {
   localStorage.setItem("vc-theme", mode);
   applyTheme(mode);
+  // 持久化到 config.json（config 为权威源，localStorage 仅作启动快速缓存）
+  invoke("set_theme", { mode }).catch(() => {});
 }
 
 export function applyTheme(mode) {
@@ -389,7 +391,8 @@ export function showForm({ title, fields, confirmText = "保存" }) {
       refreshFocusClasses();
       list[fi].focus();
       const cur = visibleRows()[fi];
-      if (cur.type === "input") cur.input.select();
+      // 仅空值字段全选便于直接输入；密码/有值字段保持光标
+      if (cur.type === "input" && cur.input.value === "") cur.input.select();
     }
 
     function done(v) {
@@ -413,19 +416,26 @@ export function showForm({ title, fields, confirmText = "保存" }) {
       if (e.key === "Escape") { e.preventDefault(); done(null); return; }
       const cur = visibleRows()[fi];
       if (cur && cur.type === "select") {
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        e.preventDefault();
-        cur.active = (cur.active + (e.key === "ArrowRight" ? 1 : -1) + cur.buttons.length) % cur.buttons.length;
-        syncSelect(cur);
-        const f = fields.find((x) => x.key === cur.key);
-        if (f.onChange) f.onChange(f.options[cur.active].value, api);
-        refreshFocusClasses(); // 字段显隐变化后重刷高亮，避免残留
-        return;
-      }
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          cur.active = (cur.active + (e.key === "ArrowRight" ? 1 : -1) + cur.buttons.length) % cur.buttons.length;
+          syncSelect(cur);
+          const f = fields.find((x) => x.key === cur.key);
+          if (f.onChange) f.onChange(f.options[cur.active].value, api);
+          refreshFocusClasses(); // 字段显隐变化后重刷高亮，避免残留
+          return;
+        }
       }
       if (e.key === "ArrowDown" || e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
-        if (e.key === "Enter" && fi >= list.length - 1) { submit(); return; }
+        // Enter：最后一项且为输入框才提交；select 上 Enter 不提交（避免误确认）
+        if (e.key === "Enter") {
+          const last = visibleRows()[fi];
+          if (fi >= list.length - 1 && (!last || last.type !== "select")) {
+            submit();
+            return;
+          }
+        }
         focusIdx(fi + 1);
         return;
       }

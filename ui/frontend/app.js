@@ -9,7 +9,7 @@
 
 import { TABS } from "./tabs/index.js";
 import {
-  $, toast, invoke, enterConsole,
+  $, toast, invoke, enterConsole, applyTheme,
   isConsoleActive, exitConsole, consoleKeyDown, consoleKeyUp,
   drawFrame, setConnState,
 } from "./shared.js";
@@ -109,14 +109,14 @@ function tabbarKey(e) {
 }
 
 /* ===== 全局退出（Ctrl+Alt+Q） ===== */
-function globalExit() {
+async function globalExit() {
   if (isConsoleActive()) {
     exitConsole();
     return;
   }
-  // 浏览器：关闭全部 Webview 标签
-  invoke("browser_close_all").catch(() => {});
-  toast("已关闭浏览器标签");
+  // 浏览器：关闭全部 Webview 标签（有才提示）
+  const n = await invoke("browser_close_all").catch(() => 0);
+  if (n > 0) toast(`已关闭 ${n} 个浏览器标签`);
 }
 
 /* ===== 全局键盘路由 ===== */
@@ -179,13 +179,22 @@ window.__TAURI__.event.listen("pve-status", (ev) => {
 function boot() {
   renderTabbar();
   activate("home");
+  // 应用持久化主题（config 为权威源，覆盖 localStorage 快速缓存）
+  invoke("get_config")
+    .then((cfg) => {
+      if (cfg && cfg.theme) {
+        localStorage.setItem("vc-theme", cfg.theme);
+        applyTheme(cfg.theme);
+      }
+    })
+    .catch(() => {});
   // PVE 连接：未配置时自动进入 Mock 模式（开发机离线可用）
   invoke("pve_connect")
     .then((msg) => {
       if (msg.includes("Mock")) setConnState("err");
     })
     .catch((e) => toast("PVE 连接失败: " + e));
-  // 开机直连（VIRTCONSOLE_AUTOCONNECT_VMID）
+  // 开机直连（config.autoconnect_vmid，回退环境变量）
   invoke("boot_vmid").then((vmid) => {
     if (vmid) enterConsole(vmid);
   });
