@@ -53,7 +53,7 @@ pub fn open(app: &AppHandle, state: &BrowserState, url: String) -> Result<String
         .inner_size(1280.0, 800.0)
         .position(0.0, 0.0)
         .on_page_load(|webview, payload| {
-            // 网页窗口拿到焦点后，主窗口收不到 Esc；注入返回按钮 + Esc 监听
+            // 网页窗口拿到焦点后，主窗口收不到按键；注入返回按钮 + 统一退出键 Ctrl+Alt+Q 监听
             if payload.event() == PageLoadEvent::Finished {
                 let js = r#"(function(){
                     function vcExit(){
@@ -67,7 +67,7 @@ pub fn open(app: &AppHandle, state: &BrowserState, url: String) -> Result<String
                     btn.addEventListener('click', vcExit);
                     document.documentElement.appendChild(btn);
                     document.addEventListener('keydown', function(e){
-                        if (e.key === 'Escape') { vcExit(); }
+                        if (e.ctrlKey && e.altKey && (e.key === 'q' || e.key === 'Q')) { vcExit(); }
                     }, true);
                 })();"#;
                 let _ = webview.eval(js);
