@@ -37,6 +37,12 @@ function renderTabbar() {
       state.tabbarFocus = false;
       activate(t.id);
     });
+    b.addEventListener("mouseenter", () => {
+      if (state.tabbarFocus) {
+        state.current = t.id;
+        renderTabbar();
+      }
+    });
     tabbar.appendChild(b);
   });
 }
@@ -46,10 +52,17 @@ const ctx = {
   activate,
   back() {
     state.tabbarFocus = true;
+    blurCurrentTab();
     renderTabbar();
   },
   toast,
 };
+
+// 离开内容区去 Tab 栏时，清除当前 Tab 的内容高亮（Tab 栏⇄内容 高亮互斥）
+function blurCurrentTab() {
+  const t = TABS.find((x) => x.id === state.current);
+  t?.blur?.();
+}
 
 function activate(id) {
   const tab = TABS.find((t) => t.id === id);
@@ -132,6 +145,7 @@ document.addEventListener("keydown", (e) => {
       break;
     case "Escape":
       state.tabbarFocus = true;
+      blurCurrentTab();
       renderTabbar();
       e.preventDefault();
       break;
@@ -165,7 +179,12 @@ window.__TAURI__.event.listen("pve-status", (ev) => {
 function boot() {
   renderTabbar();
   activate("home");
-  setConnState("err"); // PVE 未接入前显示断开
+  // PVE 连接：未配置时自动进入 Mock 模式（开发机离线可用）
+  invoke("pve_connect")
+    .then((msg) => {
+      if (msg.includes("Mock")) setConnState("err");
+    })
+    .catch((e) => toast("PVE 连接失败: " + e));
   // 开机直连（VIRTCONSOLE_AUTOCONNECT_VMID）
   invoke("boot_vmid").then((vmid) => {
     if (vmid) enterConsole(vmid);

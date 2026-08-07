@@ -38,6 +38,10 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* 全局取消原生 focus 外框：焦点指示统一由 .focused 高亮 与 输入框边框 承担，
+   避免点击过的按钮/元素残留系统焦点环，与键盘高亮两套并存 */
+*:focus { outline: none; }
+
 html, body {
   height: 100%;
   overflow: hidden;
@@ -416,3 +420,192 @@ html, body {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .toast.hidden { opacity: 0; transform: translateX(-50%) translateY(8px); pointer-events: none; }
+
+/* ===== 徽标 ===== */
+.badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.running { background: rgba(48, 209, 88, 0.15); color: var(--ok); }
+.badge.paused { background: rgba(255, 214, 10, 0.15); color: var(--warn); }
+.badge.stopped { background: var(--divider); color: var(--text-2); }
+.badge.starting { background: var(--accent-weak); color: var(--accent); }
+
+/* ===== 按钮 ===== */
+.btn {
+  padding: 14px 26px;
+  border-radius: var(--radius-btn);
+  border: 1px solid transparent;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: default;
+  font-family: inherit;
+  transition: box-shadow var(--ease), transform var(--ease), opacity var(--ease);
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-ghost { background: var(--surface); color: var(--text); border-color: var(--divider); }
+.btn.focused { box-shadow: var(--focus-ring); transform: scale(1.04); }
+.btn:disabled { opacity: 0.4; }
+
+/* ===== 模态对话框 ===== */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  outline: none;
+}
+.modal-card {
+  min-width: 420px;
+  max-width: 600px;
+  background: var(--raised);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  padding: 28px 30px;
+  box-shadow: var(--shadow);
+}
+.modal-title { font-size: 20px; font-weight: 700; }
+.modal-desc { margin-top: 10px; font-size: 15px; color: var(--text-2); line-height: 1.6; }
+.modal-input {
+  margin-top: 18px;
+  width: 100%;
+  height: 50px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--divider);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px;
+  padding: 0 16px;
+  outline: none;
+}
+.modal-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.modal-btns { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+
+/* 表单对话框 */
+.form-card { min-width: 460px; }
+.form-row { margin-top: 16px; }
+.form-label { font-size: 13px; color: var(--text-3); margin-bottom: 6px; }
+.form-input {
+  width: 100%;
+  height: 48px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--divider);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px;
+  padding: 0 16px;
+  outline: none;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.form-input:focus, .form-input.focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-weak);
+}
+.seg { display: flex; gap: 8px; outline: none; }
+/* 焦点指示只落在当前选中的选项按钮上，而不是整行 */
+.seg.focused .seg-btn.active { box-shadow: var(--focus-ring); }
+.seg-btn {
+  flex: 1;
+  padding: 13px 16px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--divider);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: default;
+  font-family: inherit;
+  transition: border-color var(--ease), color var(--ease), background var(--ease);
+}
+.seg-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+
+/* ===== 实体列表 / 实体页 ===== */
+.entity-list { display: flex; flex-direction: column; gap: 10px; max-width: 900px; }
+.erow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  cursor: default;
+  transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.erow.focused { border-color: var(--accent); box-shadow: var(--focus-ring); transform: scale(1.01); }
+.erow .e-name { font-size: 18px; font-weight: 600; }
+.erow .e-sub { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+.erow .e-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+
+.entity-head { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
+.back-btn {
+  font-size: 15px;
+  color: var(--text-2);
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--divider);
+  cursor: default;
+  transition: color var(--ease), border-color var(--ease), box-shadow var(--ease);
+}
+.back-btn.focused { color: var(--accent); border-color: var(--accent); box-shadow: var(--focus-ring); }
+.entity-title { font-size: 22px; font-weight: 700; }
+
+.subnav { display: flex; gap: 8px; border-bottom: 1px solid var(--divider); margin-bottom: 20px; padding-bottom: 12px; }
+.subnav-item {
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: default;
+  position: relative;
+  transition: color var(--ease), box-shadow var(--ease);
+}
+.subnav-item.active { color: var(--accent); }
+.subnav-item.active::after {
+  content: "";
+  display: block;
+  height: 3px;
+  width: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  margin-top: 6px;
+}
+.subnav-item.focused { box-shadow: var(--focus-ring); border-radius: 10px; }
+
+.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.info-cell {
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  padding: 16px 18px;
+}
+.info-cell .k { font-size: 13px; color: var(--text-3); }
+.info-cell .v { font-size: 19px; font-weight: 600; margin-top: 6px; }
+
+.ops-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+
+.vlist { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.vrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  cursor: default;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.vrow.focused { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.vrow .rl { font-size: 16px; font-weight: 600; }
+.vrow .rr { font-size: 13px; color: var(--text-3); }

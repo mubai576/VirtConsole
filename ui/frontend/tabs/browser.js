@@ -5,13 +5,27 @@ let browserFocus = "addr"; // addr | quick | tabs
 let browserSel = 0;
 let browserTabs = [];
 
+function blurAddr() {
+  if (browserFocus !== "addr") $("#browser-addr")?.blur();
+}
+
+// 清理另一组件的高亮（quick ⇄ tabs 互斥）
+function clearAll() {
+  document.querySelectorAll("#browser-quick .quick").forEach((el) => el.classList.remove("focused"));
+  document.querySelectorAll("#browser-tabs .tab-chip").forEach((el) => el.classList.remove("focused"));
+}
+
 function renderQuick() {
+  blurAddr();
+  clearAll();
   document.querySelectorAll("#browser-quick .quick").forEach((el, i) => {
     el.classList.toggle("focused", browserFocus === "quick" && i === browserSel);
   });
 }
 
 function renderTabs() {
+  blurAddr();
+  clearAll();
   const wrap = $("#browser-tabs");
   if (!wrap) return;
   wrap.innerHTML = "";
@@ -19,9 +33,8 @@ function renderTabs() {
     const chip = document.createElement("button");
     chip.className = "tab-chip" + (browserFocus === "tabs" && i === browserSel ? " focused" : "");
     chip.textContent = t.url;
-    chip.addEventListener("click", () => {
-      invoke("browser_focus", { label: t.label });
-    });
+    chip.addEventListener("click", () => { browserFocus = "tabs"; browserSel = i; renderTabs(); invoke("browser_focus", { label: t.label }); });
+    chip.addEventListener("mouseenter", () => { browserFocus = "tabs"; browserSel = i; renderTabs(); });
     wrap.appendChild(chip);
   });
 }
@@ -57,11 +70,13 @@ function mount(el) {
     </div>
   `;
 
+  $("#browser-addr").addEventListener("focus", () => { browserFocus = "addr"; clearAll(); });
   $("#browser-go").addEventListener("click", () => {
     browserOpenUrl($("#browser-addr").value);
   });
-  document.querySelectorAll("#browser-quick .quick").forEach((q) => {
-    q.addEventListener("click", () => browserOpenUrl(q.dataset.url));
+  document.querySelectorAll("#browser-quick .quick").forEach((q, i) => {
+    q.addEventListener("click", () => { browserFocus = "quick"; browserSel = i; renderQuick(); browserOpenUrl(q.dataset.url); });
+    q.addEventListener("mouseenter", () => { browserFocus = "quick"; browserSel = i; renderQuick(); });
   });
 
   setCrumb("浏览器");
@@ -76,6 +91,10 @@ export default {
   focus() {
     if (browserFocus === "addr") setTimeout(() => $("#browser-addr")?.focus(), 60);
     else renderTabs();
+  },
+  blur() {
+    clearAll();
+    $("#browser-addr")?.blur();
   },
   onKey(e, ctx) {
     if (e.key === "Escape") return false; // 交回 app.js（回 Tab 栏）

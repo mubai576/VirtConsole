@@ -7,10 +7,28 @@ use serde_json::json;
 use tauri::{Emitter, Manager};
 
 mod browser;
+mod config;
+mod pve;
 mod qmp;
+
+use std::sync::Arc;
 
 use browser::BrowserState;
 use qmp::QmpState;
+use tokio::sync::Mutex;
+
+/// PVE 客户端状态（单连接，串行化复用）
+pub struct PveState {
+    pub client: Arc<Mutex<Option<pve::PveClient>>>,
+}
+
+impl Default for PveState {
+    fn default() -> Self {
+        Self {
+            client: Arc::new(Mutex::new(None)),
+        }
+    }
+}
 
 /// 返回应用与平台信息（供状态栏展示，验证 IPC 通路）
 #[tauri::command]
@@ -118,11 +136,168 @@ async fn vm_status(state: tauri::State<'_, QmpState>) -> Result<String, String> 
     Ok(qmp::status(&state).await)
 }
 
+// ===== 配置 =====
+
+#[tauri::command]
+fn get_config(app: tauri::AppHandle) -> config::Config {
+    config::load(&app)
+}
+
+#[tauri::command]
+fn set_theme(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    let mut c = config::load(&app);
+    c.theme = mode;
+    config::save(&app, &c)
+}
+
+#[tauri::command]
+fn set_ui_scale(app: tauri::AppHandle, scale: String) -> Result<(), String> {
+    let mut c = config::load(&app);
+    c.ui_scale = scale;
+    config::save(&app, &c)
+}
+
+#[tauri::command]
+fn set_capture(app: tauri::AppHandle, fps: u32, scale: String) -> Result<(), String> {
+    let mut c = config::load(&app);
+    c.capture_fps = fps;
+    c.capture_scale = scale;
+    config::save(&app, &c)
+}
+
+#[tauri::command]
+fn set_autoconnect(app: tauri::AppHandle, vmid: Option<u32>) -> Result<(), String> {
+    let mut c = config::load(&app);
+    c.autoconnect_vmid = vmid;
+    config::save(&app, &c)
+}
+
+#[tauri::command]
+async fn set_pve_config(
+    app: tauri::AppHandle,
+    method: String,
+    host: String,
+    node: String,
+    token: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<String, String> {
+    let auth = config::PveAuth {
+        method,
+        host,
+        node,
+        token,
+        username,
+        password,
+    };
+    let mut cli = pve::PveClient::new(&auth);
+    let msg = cli.connect().await?;
+    let mut c = config::load(&app);
+    c.pve = Some(auth);
+    config::save(&app, &c)?;
+    Ok(msg)
+}
+
+// ===== PVE 运维 =====
+
+#[tauri::command]
+async fn pve_connect(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PveState>,
+) -> Result<String, String> {
+    let cfg = config::load(&app);
+    let auth = cfg.pve.clone().unwrap_or_else(|| config::PveAuth {
+        method: "token".into(),
+        host: "mock://".into(),
+        node: "pve".into(),
+        token: None,
+        username: None,
+        password: None,
+    });
+    let mut cli = pve::PveClient::new(&auth);
+    let msg = cli.connect().await?;
+    *state.client.lock().await = Some(cli);
+    let _ = app.emit("pve-status", json!({ "state": "ok" }));
+    Ok(msg)
+}
+
+#[tauri::command]
+async fn pve_entities(state: tauri::State<'_, PveState>) -> Result<Vec<pve::Entity>, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE（请到 设置 → PVE 连接 配置）")?;
+    cli.list_entities().await
+}
+
+#[tauri::command]
+async fn pve_vm_detail(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+) -> Result<pve::VmDetail, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.vm_detail(vmid).await
+}
+
+#[tauri::command]
+async fn pve_vm_action(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+    action: String,
+) -> Result<(), String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.vm_action(vmid, &action).await
+}
+
+#[tauri::command]
+async fn pve_snapshots(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+) -> Result<Vec<pve::Snapshot>, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.snapshots(vmid).await
+}
+
+#[tauri::command]
+async fn pve_snapshot_create(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+    name: String,
+) -> Result<(), String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.snapshot_create(vmid, &name).await
+}
+
+#[tauri::command]
+async fn pve_snapshot_rollback(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+    name: String,
+) -> Result<(), String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.snapshot_rollback(vmid, &name).await
+}
+
+#[tauri::command]
+async fn pve_snapshot_delete(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+    name: String,
+) -> Result<(), String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.snapshot_delete(vmid, &name).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(QmpState::default())
         .manage(BrowserState::default())
+        .manage(PveState::default())
         .setup(|app| {
             // 验证/演示钩子：VIRTCONSOLE_BROWSER_AUTOOPEN 指定启动后自动打开的网址
             if let Ok(url) = std::env::var("VIRTCONSOLE_BROWSER_AUTOOPEN") {
@@ -146,6 +321,20 @@ pub fn run() {
             vm_input_key,
             vm_input_text,
             vm_status,
+            get_config,
+            set_theme,
+            set_ui_scale,
+            set_capture,
+            set_autoconnect,
+            set_pve_config,
+            pve_connect,
+            pve_entities,
+            pve_vm_detail,
+            pve_vm_action,
+            pve_snapshots,
+            pve_snapshot_create,
+            pve_snapshot_rollback,
+            pve_snapshot_delete,
             browser_open,
             browser_close,
             browser_close_all,

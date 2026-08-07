@@ -116,6 +116,14 @@ export async function enterConsole(vmid) {
   }
 }
 
+// 控制台内鼠标点击画面 → 重新聚焦（避免按键丢失）
+$("#vm-canvas").addEventListener("click", () => {
+  if (consoleActive) {
+    window.focus();
+    document.body.focus();
+  }
+});
+
 export function exitConsole() {
   consoleActive = false;
   $("#console-layer").classList.add("hidden");
@@ -161,4 +169,293 @@ export function drawFrame(width, height, b64) {
   canvas.width = width;
   canvas.height = height;
   ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+}
+
+/* ===== 跨 Tab 深链（首页 → 虚拟机 Tab 打开指定实体） ===== */
+let vmTarget = null;
+export function setVmTarget(vmid) {
+  vmTarget = vmid;
+}
+export function takeVmTarget() {
+  const t = vmTarget;
+  vmTarget = null;
+  return t;
+}
+
+/* ===== 格式化 ===== */
+export function fmtBytes(b) {
+  if (b == null || isNaN(b)) return "--";
+  const g = b / 1073741824;
+  if (g >= 1) return g.toFixed(1) + "G";
+  const m = b / 1048576;
+  return Math.round(m) + "M";
+}
+export function fmtPct(v) {
+  if (v == null || isNaN(v)) return "--";
+  return Math.round(v) + "%";
+}
+
+/* ===== 模态对话框（确认 / 选择 / 输入） ===== */
+function openModal(html) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal";
+  overlay.innerHTML = `<div class="modal-card">${html}</div>`;
+  document.body.appendChild(overlay);
+  overlay.setAttribute("tabindex", "-1");
+  overlay.focus();
+  return overlay;
+}
+
+/** 确认对话框 → Promise<boolean>；danger 时确认按钮为红色 */
+export function showConfirm({ title, desc = "", danger = false, confirmText = "确认", cancelText = "取消" }) {
+  return new Promise((resolve) => {
+    const ov = openModal(
+      `<div class="modal-title">${title}</div>` +
+        (desc ? `<div class="modal-desc">${desc}</div>` : "") +
+        `<div class="modal-btns"><button class="btn btn-ghost">${cancelText}</button><button class="btn ${danger ? "btn-danger" : "btn-primary"}">${confirmText}</button></div>`
+    );
+    const btns = ov.querySelectorAll("button");
+    let idx = 1;
+    const render = () => btns.forEach((b, i) => b.classList.toggle("focused", i === idx));
+    const done = (v) => { ov.remove(); resolve(v); };
+    render();
+    const onKey = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") { idx = 1 - idx; render(); }
+      else if (e.key === "Enter") done(idx === 1);
+      else if (e.key === "Escape") done(false);
+    };
+    ov.addEventListener("keydown", onKey, true);
+    btns.forEach((b, i) => {
+      b.addEventListener("click", () => done(i === 1));
+      b.addEventListener("mouseenter", () => { idx = i; render(); });
+    });
+  });
+}
+
+/** 多选对话框 → Promise<index | -1>；options: [{label, danger?}] */
+export function showChoice({ title, options }) {
+  return new Promise((resolve) => {
+    const btnsHtml = options
+      .map((o) => `<button class="btn ${o.danger ? "btn-danger" : "btn-primary"}">${o.label}</button>`)
+      .join("");
+    const ov = openModal(`<div class="modal-title">${title}</div><div class="modal-btns">${btnsHtml}</div>`);
+    const btns = ov.querySelectorAll("button");
+    let idx = 0;
+    const render = () => btns.forEach((b, i) => b.classList.toggle("focused", i === idx));
+    const done = (i) => { ov.remove(); resolve(i); };
+    render();
+    const onKey = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        idx = (idx + (e.key === "ArrowRight" ? 1 : -1) + btns.length) % btns.length;
+        render();
+      } else if (e.key === "Enter") done(idx);
+      else if (e.key === "Escape") done(-1);
+    };
+    ov.addEventListener("keydown", onKey, true);
+    btns.forEach((b, i) => {
+      b.addEventListener("click", () => done(i));
+      b.addEventListener("mouseenter", () => { idx = i; render(); });
+    });
+  });
+}
+
+/** 输入对话框 → Promise<string|null>；kind: text / password */
+export function showInput({ title, initial = "", kind = "text", confirmText = "确定" }) {
+  return new Promise((resolve) => {
+    const esc = initial.replace(/"/g, "&quot;");
+    const ov = openModal(
+      `<div class="modal-title">${title}</div>` +
+        `<input class="modal-input" type="${kind}" value="${esc}" autocomplete="off" spellcheck="false">` +
+        `<div class="modal-btns"><button class="btn btn-ghost">取消</button><button class="btn btn-primary">${confirmText}</button></div>`
+    );
+    const input = ov.querySelector("input");
+    const btns = ov.querySelectorAll("button");
+    // 焦点始终在输入框：Enter 提交 / Esc 取消；其余按键直通输入框并屏蔽全局路由
+    const onKey = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); done(input.value); return; }
+      if (e.key === "Escape") { e.preventDefault(); done(null); return; }
+      e.stopPropagation();
+    };
+    const done = (v) => { ov.remove(); resolve(v); };
+    input.addEventListener("keydown", onKey);
+    btns[1].addEventListener("click", () => done(input.value));
+    btns[0].addEventListener("click", () => done(null));
+    input.focus();
+    input.select();
+  });
+}
+
+/**
+ * 表单对话框（多个字段一次填写）→ Promise<{key:value} | null>
+ * fields: [{ key, label, kind: "text"|"password"|"select", initial, required, options?:[{label,value}],
+ *           onChange?: (value, {setVisible}) => void, visible?: bool }]
+ * 交互：↑↓/Tab 在字段间移动，Enter 下一字段、最后一项 Enter 提交；←→ 切换 select；Esc 取消。
+ */
+export function showForm({ title, fields, confirmText = "保存" }) {
+  return new Promise((resolve) => {
+    const ov = document.createElement("div");
+    ov.className = "modal";
+    ov.setAttribute("tabindex", "-1");
+    const card = document.createElement("div");
+    card.className = "modal-card form-card";
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+
+    const rows = fields.map((f) => {
+      const wrap = document.createElement("div");
+      wrap.className = "form-row";
+      if (f.visible === false) wrap.style.display = "none";
+      const label = document.createElement("div");
+      label.className = "form-label";
+      label.textContent = f.label;
+      wrap.appendChild(label);
+      const row = { key: f.key, wrap, type: f.kind === "select" ? "select" : "input" };
+      if (row.type === "select") {
+        const seg = document.createElement("div");
+        seg.className = "seg";
+        seg.setAttribute("tabindex", "-1");
+        row.active = 0;
+        row.buttons = f.options.map((o, j) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "seg-btn" + (j === 0 ? " active" : "");
+          b.textContent = o.label;
+          b.addEventListener("click", () => { row.active = j; syncSelect(row); fi = visibleRows().indexOf(row); refreshFocusClasses(); if (f.onChange) f.onChange(o.value, api); refreshFocusClasses(); });
+          seg.appendChild(b);
+          return b;
+        });
+        row.el = seg;
+        wrap.appendChild(seg);
+      } else {
+        const input = document.createElement("input");
+        input.className = "form-input";
+        input.type = f.kind === "password" ? "password" : "text";
+        input.value = f.initial || "";
+        input.setAttribute("autocomplete", "off");
+        input.setAttribute("spellcheck", "false");
+        row.input = input;
+        row.required = !!f.required;
+        wrap.appendChild(input);
+      }
+      card.appendChild(wrap);
+      return row;
+    });
+
+    card.insertAdjacentHTML("afterbegin", `<div class="modal-title">${title}</div>`);
+    const btnsWrap = document.createElement("div");
+    btnsWrap.className = "modal-btns";
+    btnsWrap.innerHTML = `<button type="button" class="btn btn-ghost">取消</button><button type="button" class="btn btn-primary">${confirmText}</button>`;
+    card.appendChild(btnsWrap);
+    const [btnCancel, btnOk] = btnsWrap.querySelectorAll("button");
+
+    const api = { setVisible };
+    function setVisible(key, show) {
+      const r = rows.find((x) => x.key === key);
+      if (r) r.wrap.style.display = show ? "" : "none";
+    }
+    function syncSelect(row) {
+      row.buttons.forEach((b, j) => b.classList.toggle("active", j === row.active));
+    }
+    function visibleRows() {
+      return rows.filter((r) => r.wrap.style.display !== "none");
+    }
+    function items() {
+      return visibleRows().map((r) => (r.type === "select" ? r.el : r.input));
+    }
+    function collect() {
+      const out = {};
+      rows.forEach((r) => {
+        if (r.type === "select") {
+          const f = fields.find((x) => x.key === r.key);
+          out[r.key] = f.options[r.active].value;
+        } else {
+          out[r.key] = r.input.value;
+        }
+      });
+      return out;
+    }
+
+    let fi = 0;
+    // 统一刷新 .focused（鼠标/键盘共用同一高亮位）
+    function refreshFocusClasses() {
+      items().forEach((el, j) => el.classList.toggle("focused", j === fi));
+    }
+    function focusIdx(i) {
+      const list = items();
+      if (!list.length) return;
+      fi = ((i % list.length) + list.length) % list.length;
+      refreshFocusClasses();
+      list[fi].focus();
+      const cur = visibleRows()[fi];
+      if (cur.type === "input") cur.input.select();
+    }
+
+    function done(v) {
+      ov.remove();
+      resolve(v);
+    }
+    function submit() {
+      // 必填校验：跳到第一个为空的可见输入框
+      const vis = visibleRows();
+      const missing = vis.find((r) => r.type === "input" && r.required && !r.input.value.trim());
+      if (missing) {
+        focusIdx(vis.indexOf(missing));
+        return;
+      }
+      done(collect());
+    }
+
+    ov.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      const list = items();
+      if (e.key === "Escape") { e.preventDefault(); done(null); return; }
+      const cur = visibleRows()[fi];
+      if (cur && cur.type === "select") {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        cur.active = (cur.active + (e.key === "ArrowRight" ? 1 : -1) + cur.buttons.length) % cur.buttons.length;
+        syncSelect(cur);
+        const f = fields.find((x) => x.key === cur.key);
+        if (f.onChange) f.onChange(f.options[cur.active].value, api);
+        refreshFocusClasses(); // 字段显隐变化后重刷高亮，避免残留
+        return;
+      }
+      }
+      if (e.key === "ArrowDown" || e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault();
+        if (e.key === "Enter" && fi >= list.length - 1) { submit(); return; }
+        focusIdx(fi + 1);
+        return;
+      }
+      if (e.key === "ArrowUp" || (e.shiftKey && e.key === "Tab")) {
+        e.preventDefault();
+        focusIdx(fi - 1);
+        return;
+      }
+    });
+
+    btnOk.addEventListener("click", submit);
+    btnCancel.addEventListener("click", () => done(null));
+
+    // 鼠标聚焦字段时同步键盘焦点序号（fi）并刷新高亮（清除旧字段 .focused）
+    // 注意：fi 必须始终是「可见字段」下标，不能是 rows 全量下标
+    rows.forEach((r) => {
+      const focusSync = () => {
+        const idx = visibleRows().indexOf(r);
+        if (idx >= 0) { fi = idx; refreshFocusClasses(); }
+      };
+      if (r.type === "input") r.input.addEventListener("focus", focusSync);
+      else r.el.addEventListener("focus", focusSync);
+    });
+
+    // 初始化 select 依赖字段可见性
+    fields.forEach((f, i) => {
+      if (f.kind === "select" && f.onChange) {
+        f.onChange(f.options[rows[i].active].value, api);
+      }
+    });
+    focusIdx(0);
+  });
 }
