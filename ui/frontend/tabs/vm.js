@@ -29,6 +29,7 @@ window.__vcDebug = () => ({
   cidx: fstate.cidx,
   contentLen: focusContentList.length,
   entityKind: fstate.currentEntity ? fstate.currentEntity.kind : null,
+  termActive,
 });
 
 function subNav() {
@@ -199,8 +200,7 @@ function renderSubView() {
     }
     else {
       startTerminal(sv);
-      termActive = true;
-      setTermExitHandler(() => exitTerminal());
+      activateTerminal();
     }
   } else {
     if (fstate.sub === 0) sv.innerHTML = detail ? vmOverview() : placeholder("⏳", "加载中", "正在读取 VM 配置…");
@@ -226,13 +226,26 @@ function renderSubView() {
   bindSubView(sv);
 }
 
-// 终端退出（Ctrl+Alt+Q 触发）：销毁会话并回到实体页概览
+// 终端"退出"= 释放键盘焦点，停留在终端子视图（会话保留，交互连贯）
 function exitTerminal() {
   termActive = false;
-  stopTerminal();
-  fstate.sub = 0;
-  fstate.row = "nav";
-  renderEntity();
+  blurTerminal();
+}
+
+// 激活终端：接管键盘焦点 + 注册退出
+function activateTerminal() {
+  termActive = true;
+  setTermExitHandler(() => exitTerminal());
+  focusTerminal();
+}
+
+function blurTerminal() {
+  const el = document.querySelector("#term-wrap textarea");
+  if (el) el.blur();
+}
+function focusTerminal() {
+  const el = document.querySelector("#term-wrap textarea");
+  if (el) el.focus();
 }
 
 function stopTerminal() {
@@ -339,6 +352,8 @@ function clearNavFocus() {
 
 function hasFocusableContent() {
   if (fstate.sub === 1 && monController) return monController.cards().length > 0;
+  // 宿主终端子视图：可作为内容再次聚焦（Exit 释放焦点后可 Enter 重新进入）
+  if (fstate.currentEntity.kind === "host" && fstate.sub === 2) return true;
   return fstate.currentEntity.kind === "vm" && fstate.sub === 2 && focusContentList.length > 0;
 }
 
@@ -447,6 +462,10 @@ function entityKey(e) {
         clearNavFocus();
         updateContentFocus();
         if (fstate.sub === 1 && monController) monController.setMetric(fstate.cidx);
+        // 宿主终端：重新接管焦点（Exit 释放后可再次聚焦）
+        if (fstate.currentEntity.kind === "host" && fstate.sub === 2 && !termActive) {
+          activateTerminal();
+        }
       }
       return true;
     }

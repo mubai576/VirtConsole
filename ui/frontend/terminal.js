@@ -10,12 +10,10 @@ export function setTermExitHandler(fn) {
   exitHandler = fn;
 }
 
-/** 全局退出钩子：终端激活时返回 true 并触发退出流程 */
+/** 全局退出钩子：终端激活时返回 true 并触发退出（仅释放焦点，会话保留） */
 export function handleTermExit() {
   if (!exitHandler) return false;
   const h = exitHandler;
-  exitHandler = null;
-  disposeSession();
   h();
   return true;
 }

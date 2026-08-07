@@ -56,6 +56,11 @@ async function settingsActivateRow(idx) {
 // 确保 vm Tab 处于列表态（处理深链/实体页残留），返回是否有行
 async function ensureVmList() {
   assert(await gotoTab("vm"), "进 vm 失败");
+  // 若终端激活（键盘被接管），先释放焦点才能用 Esc 导航
+  if (window.__vcDebug && window.__vcDebug().termActive) {
+    ctrlAltQ();
+    await flush(100);
+  }
   for (let i = 0; i < 3 && !q("#vm-entities"); i++) { key("Escape"); await flush(120); }
   return waitFor(() => qa("#vm-entities .erow").length >= 1, 6000);
 }
@@ -433,14 +438,21 @@ async function suiteE() {
     await openVmEntity(0, 2);
     await wait(300);
     ctrlAltQ(); await flush(200);
-    assert(!q("#term-wrap") || !q(".xterm"), "终端未退出");
-    assert(!!q(".subnav-item"), "退出后未回实体页");
+    const d = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d.termActive === false, `终端未释放焦点 termActive=${d.termActive}`);
+    assert(!!q(".xterm"), "退出后会话被销毁（应保留）");
+    // 导航恢复：←→ 离开终端子视图
+    key("ArrowRight"); await flush(120);
+    const d2 = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d2.sub !== 2, `退出后导航未恢复 sub=${d2.sub}`);
     await goHome();
   });
   await step("E4_esc_kept_by_terminal", async () => {
     await openVmEntity(0, 2);
     await wait(300);
     key("Escape"); await flush(150);
+    const d = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d.termActive === true, "Esc 导致终端退出");
     assert(!!q(".xterm"), "Esc 导致终端退出");
     await goHome();
   });
@@ -460,8 +472,13 @@ async function suiteE() {
     assert(!!btn, "退出按钮缺失");
     click(btn);
     await flush(200);
-    assert(!q(".xterm"), "点退出按钮未关闭终端");
-    assert(!!q(".subnav-item"), "退出后未回实体页");
+    const d = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d.termActive === false, "点退出按钮未释放焦点");
+    assert(!!q(".xterm"), "退出按钮销毁了会话");
+    // 导航恢复
+    key("ArrowRight"); await flush(120);
+    const d2 = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d2.sub !== 2, `退出按钮后导航未恢复 sub=${d2.sub}`);
     await goHome();
   });
 }
