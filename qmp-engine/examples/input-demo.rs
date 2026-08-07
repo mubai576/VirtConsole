@@ -18,6 +18,9 @@ async fn run_demo(socket: &str, text: &str) -> Result<(), Box<dyn Error>> {
     qmp.type_text(text).await?;
     qmp.tap_key("ret").await?;
 
+    // 等 guest 渲染后再截屏（立即截屏会拿到旧帧）
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
     qmp.screendump("/tmp/input-after.ppm").await?;
 
     // 鼠标事件：控制台场景无可见效果，仅验证 QMP API 正常
