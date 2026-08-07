@@ -213,6 +213,8 @@ export function fmtPct(v) {
 
 /* ===== 模态对话框（确认 / 选择 / 输入） ===== */
 function openModal(html) {
+  // 打开模态前清除底层内容高亮，保证单高亮不变量
+  document.querySelectorAll(".focused").forEach((el) => el.classList.remove("focused"));
   const overlay = document.createElement("div");
   overlay.className = "modal";
   overlay.innerHTML = `<div class="modal-card">${html}</div>`;

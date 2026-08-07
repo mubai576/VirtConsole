@@ -71,6 +71,7 @@ function activate(id) {
 
   if (state.current && state.current !== id) {
     const old = TABS.find((t) => t.id === state.current);
+    old?.blur?.(); // 先清旧 Tab 内容高亮（避免跨 Tab 残留双高亮）
     old?.unmount?.();
   }
   state.current = id;
