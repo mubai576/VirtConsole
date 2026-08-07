@@ -41,6 +41,58 @@ pub struct Snapshot {
     pub state: String,
 }
 
+#[derive(Serialize, Clone)]
+pub struct HostLive {
+    pub cpu: f64, // %
+    pub mem: f64,
+    pub mem_total: f64,
+    pub swap: f64,
+    pub swap_total: f64,
+    pub load1: f64,
+    pub load5: f64,
+    pub load15: f64,
+    pub kversion: String,
+}
+
+#[derive(Serialize, Clone, Default)]
+pub struct RrdPoint {
+    pub time: i64,
+    pub cpu: Option<f64>,
+    pub mem: Option<f64>,
+    pub netin: Option<f64>,
+    pub netout: Option<f64>,
+    pub io: Option<f64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct VmLive {
+    pub status: String,
+    pub cpu: f64, // %
+    pub mem: f64,
+    pub mem_total: f64,
+}
+
+#[derive(Serialize, Clone, Default)]
+pub struct VmRrdPoint {
+    pub time: i64,
+    pub cpu: Option<f64>,
+    pub mem: Option<f64>,
+    pub diskread: Option<f64>,
+    pub diskwrite: Option<f64>,
+    pub netin: Option<f64>,
+    pub netout: Option<f64>,
+}
+
+#[derive(Serialize, Clone, Default)]
+pub struct GpuMetrics {
+    pub name: Option<String>,
+    pub util: Option<f64>, // %
+    pub temp: Option<f64>, // °C
+    pub mem_used: Option<f64>,
+    pub mem_total: Option<f64>,
+    pub power: Option<f64>, // W
+}
+
 pub struct PveClient {
     base: String,
     node: String,
@@ -244,6 +296,122 @@ impl PveClient {
         .map(|_| ())
     }
 
+    // ===== 监控（实时 + 历史曲线） =====
+
+    /// 宿主机实时状态（/nodes/{node}/status）
+    pub async fn host_live(&self) -> Result<HostLive, String> {
+        let v = self
+            .get(&format!("/api2/json/nodes/{}/status", self.node))
+            .await?;
+        let d = &v["data"];
+        Ok(HostLive {
+            cpu: d["cpu"].as_f64().unwrap_or(0.0) * 100.0,
+            mem: d["memory"].as_f64().unwrap_or(0.0),
+            mem_total: d["maxmem"].as_f64().unwrap_or(0.0),
+            swap: d["swap"].as_f64().unwrap_or(0.0),
+            swap_total: d["maxswap"].as_f64().unwrap_or(0.0),
+            load1: d["loadavg"][0].as_f64().unwrap_or(0.0),
+            load5: d["loadavg"][1].as_f64().unwrap_or(0.0),
+            load15: d["loadavg"][2].as_f64().unwrap_or(0.0),
+            kversion: d["kversion"].as_str().unwrap_or("").to_string(),
+        })
+    }
+
+    /// 宿主机历史曲线（/nodes/{node}/rrddata?timeframe=hour）
+    pub async fn host_rrd(&self, timeframe: &str) -> Result<Vec<RrdPoint>, String> {
+        let v = self
+            .get(&format!(
+                "/api2/json/nodes/{}/rrddata?timeframe={timeframe}",
+                self.node
+            ))
+            .await?;
+        let mut out = Vec::new();
+        if let Some(arr) = v["data"].as_array() {
+            for it in arr {
+                out.push(RrdPoint {
+                    time: it["time"].as_i64().unwrap_or(0),
+                    cpu: it["cpu"].as_f64().map(|x| x * 100.0),
+                    mem: it["mem"].as_f64(),
+                    netin: it["netin"].as_f64(),
+                    netout: it["netout"].as_f64(),
+                    io: it["io"].as_f64(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// VM 实时状态（/nodes/{node}/qemu/{vmid}/status/current）
+    pub async fn vm_live(&self, vmid: u32) -> Result<VmLive, String> {
+        let v = self
+            .get(&format!(
+                "/api2/json/nodes/{}/qemu/{vmid}/status/current",
+                self.node
+            ))
+            .await?;
+        let d = &v["data"];
+        Ok(VmLive {
+            status: d["status"].as_str().unwrap_or("unknown").to_string(),
+            cpu: d["cpu"].as_f64().unwrap_or(0.0) * 100.0,
+            mem: d["mem"].as_f64().unwrap_or(0.0),
+            mem_total: d["maxmem"].as_f64().unwrap_or(0.0),
+        })
+    }
+
+    /// VM 历史曲线（/nodes/{node}/qemu/{vmid}/rrddata?timeframe=hour）
+    pub async fn vm_rrd(&self, vmid: u32, timeframe: &str) -> Result<Vec<VmRrdPoint>, String> {
+        let v = self
+            .get(&format!(
+                "/api2/json/nodes/{}/qemu/{vmid}/rrddata?timeframe={timeframe}",
+                self.node
+            ))
+            .await?;
+        let mut out = Vec::new();
+        if let Some(arr) = v["data"].as_array() {
+            for it in arr {
+                out.push(VmRrdPoint {
+                    time: it["time"].as_i64().unwrap_or(0),
+                    cpu: it["cpu"].as_f64().map(|x| x * 100.0),
+                    mem: it["mem"].as_f64(),
+                    diskread: it["diskread"].as_f64(),
+                    diskwrite: it["diskwrite"].as_f64(),
+                    netin: it["netin"].as_f64(),
+                    netout: it["netout"].as_f64(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// GPU 指标（nvidia-smi；无 nvidia-smi / 非 NVIDIA 时返回 None）
+    pub async fn gpu_metrics() -> Option<GpuMetrics> {
+        let out = tokio::process::Command::new("nvidia-smi")
+            .args([
+                "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw",
+                "--format=csv,noheader,nounits",
+            ])
+            .output()
+            .await
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let line = text.lines().next()?;
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 6 {
+            return None;
+        }
+        Some(GpuMetrics {
+            name: Some(parts[0].to_string()),
+            util: parts[1].parse().ok(),
+            temp: parts[2].parse().ok(),
+            mem_used: parts[3].parse().ok(),
+            mem_total: parts[4].parse().ok(),
+            power: parts[5].parse().ok(),
+        })
+    }
+
     // ===== 底层 HTTP =====
 
     async fn get(&self, path: &str) -> Result<Value, String> {
@@ -342,6 +510,31 @@ impl PveClient {
         }
         if path.contains("/status/current") {
             return Ok(json!({"data":{"status":"running","cpu":0.32,"mem":2147483648_i64}}));
+        }
+        if path.contains("/rrddata") {
+            let base = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let mut arr = Vec::new();
+            for i in 0..60 {
+                let t = base - (59 - i) * 60;
+                let cpu = (0.3 + ((i as f64) * 0.25).sin() * 0.1 + ((i as f64) % 7.0) * 0.02).min(0.95);
+                let mem = 0.5 + ((i as f64) * 0.12).sin() * 0.04;
+                let mut p = json!({ "time": t, "cpu": cpu, "mem": mem * 21474836480.0 });
+                if path.contains("/qemu/") {
+                    p["diskread"] = json!(1048576.0 * (0.4 + ((i as f64) * 0.2).sin()));
+                    p["diskwrite"] = json!(1048576.0 * (0.2 + ((i as f64) * 0.15).cos()));
+                    p["netin"] = json!(524288.0 * (0.5 + ((i as f64) * 0.3).sin()));
+                    p["netout"] = json!(262144.0 * (0.3 + ((i as f64) * 0.2).cos()));
+                } else {
+                    p["netin"] = json!(1048576.0 * (0.5 + ((i as f64) * 0.3).sin()));
+                    p["netout"] = json!(524288.0 * (0.3 + ((i as f64) * 0.2).cos()));
+                    p["io"] = json!(3145728.0 * (0.4 + ((i as f64) * 0.25).sin()));
+                }
+                arr.push(p);
+            }
+            return Ok(json!({ "data": arr }));
         }
         if path.contains("/snapshot") {
             return Ok(json!({"data":{"snapshots":[

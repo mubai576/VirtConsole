@@ -5,6 +5,7 @@ import {
   showConfirm, showChoice, showInput,
   takeVmTarget, fmtBytes, fmtPct,
 } from "../shared.js";
+import { startMonitor } from "../monitor.js";
 
 let ctx = null;
 let entities = [];
@@ -12,6 +13,7 @@ let detail = null;
 let snapshots = [];
 let focusContentList = [];
 let listRowEls = [];
+let monController = null;
 
 const fstate = { mode: "list", idx: 0, sub: 0, row: "nav", cidx: 0 };
 const SUB_VM = ["概览", "监控", "操作"];
@@ -124,6 +126,7 @@ function openEntity(e) {
 }
 
 function backToList() {
+  if (monController) { monController.stop(); monController = null; }
   fstate.mode = "list";
   fstate.currentEntity = null;
   fstate.idx = Math.min(fstate.idx, Math.max(0, entities.length - 1));
@@ -158,14 +161,16 @@ function renderEntity() {
 function renderSubView() {
   const sv = $("#vm-subview");
   if (!sv) return;
+  // 停止旧监控轮询（每次重建子视图前）
+  if (monController) { monController.stop(); monController = null; }
   const e = fstate.currentEntity;
   if (e.kind === "host") {
     if (fstate.sub === 0) sv.innerHTML = hostOverview();
-    else if (fstate.sub === 1) sv.innerHTML = placeholder("📈", "宿主机监控", "P3 接入：CPU / 内存 / 磁盘 / 网络 / GPU 指标与历史曲线。");
+    else if (fstate.sub === 1) monController = startMonitor(sv, e);
     else sv.innerHTML = placeholder("💻", "宿主机终端", "P4 接入：xterm.js + Rust PTY（宿主机 Bash）。");
   } else {
     if (fstate.sub === 0) sv.innerHTML = detail ? vmOverview() : placeholder("⏳", "加载中", "正在读取 VM 配置…");
-    else if (fstate.sub === 1) sv.innerHTML = placeholder("📈", "VM 监控", "P3 接入：CPU / 内存 / 磁盘 IO / 网络 指标与历史曲线。");
+    else if (fstate.sub === 1) monController = startMonitor(sv, e);
     else sv.innerHTML = vmOps();
   }
   bindSubView(sv);
@@ -211,6 +216,17 @@ function vmOps() {
 
 function bindSubView(sv) {
   focusContentList = [];
+  const isMonitor = fstate.currentEntity && fstate.sub === 1 && monController;
+  if (isMonitor) {
+    const cards = monController.cards();
+    focusContentList = cards;
+    cards.forEach((c, i) => {
+      c.addEventListener("click", () => { fstate.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); monController.setMetric(i); });
+      c.addEventListener("mouseenter", () => { if (fstate.cidx !== i || fstate.row !== "content") { fstate.row = "content"; clearNavFocus(); fstate.cidx = i; updateContentFocus(); monController.setMetric(i); } });
+    });
+    if (fstate.row === "content") updateContentFocus();
+    return;
+  }
   if (fstate.currentEntity.kind === "vm" && fstate.sub === 2) {
     const ops = [...sv.querySelectorAll("#vm-ops-row .btn")];
     renderSnapshots();
@@ -255,6 +271,7 @@ function clearNavFocus() {
 }
 
 function hasFocusableContent() {
+  if (fstate.sub === 1 && monController) return monController.cards().length > 0;
   return fstate.currentEntity.kind === "vm" && fstate.sub === 2 && focusContentList.length > 0;
 }
 
@@ -362,6 +379,7 @@ function entityKey(e) {
         focus.cidx = 0;
         clearNavFocus();
         updateContentFocus();
+        if (fstate.sub === 1 && monController) monController.setMetric(fstate.cidx);
       }
       return true;
     }
@@ -373,6 +391,8 @@ function entityKey(e) {
     if (focusContentList.length) {
       fstate.cidx = (fstate.cidx + (e.key === "ArrowRight" ? 1 : -1) + focusContentList.length) % focusContentList.length;
       updateContentFocus();
+      // 监控视图：同步切换曲线指标
+      if (fstate.sub === 1 && monController) monController.setMetric(fstate.cidx);
     }
     return true;
   }
@@ -391,6 +411,7 @@ export default {
   mount,
   focus,
   blur() {
+    if (monController) { monController.stop(); monController = null; }
     listRowEls.forEach((el) => el.classList.remove("focused"));
     focusContentList.forEach((el) => el.classList.remove("focused"));
     document.querySelectorAll(".subnav-item").forEach((el) => el.classList.remove("focused"));
@@ -413,7 +434,9 @@ export default {
     }
     return entityKey(e);
   },
-  unmount() {},
+  unmount() {
+    if (monController) { monController.stop(); monController = null; }
+  },
 };
 
 /* 列表轻量轮询（仅 vm Tab 激活且处于列表态时刷新状态，5s） */

@@ -609,3 +609,32 @@ html, body {
 .vrow.focused { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .vrow .rl { font-size: 16px; font-weight: 600; }
 .vrow .rr { font-size: 13px; color: var(--text-3); }
+
+/* ===== 监控视图 ===== */
+.mon-live {
+  color: var(--text-2);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.mon-line b { color: var(--text); }
+.mon-cards { display: flex; flex-wrap: wrap; gap: 12px; }
+.mon-cards .info-cell {
+  cursor: default;
+  transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.mon-cards .info-cell.focused {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  transform: scale(1.03);
+}
+.mon-chart {
+  margin-top: 18px;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  padding: 12px;
+}
+.mon-chart canvas { width: 100%; height: 220px; display: block; }

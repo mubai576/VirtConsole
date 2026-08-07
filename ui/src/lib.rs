@@ -295,6 +295,51 @@ async fn pve_snapshot_delete(
     cli.snapshot_delete(vmid, &name).await
 }
 
+// ===== 监控 =====
+
+#[tauri::command]
+async fn pve_host_live(state: tauri::State<'_, PveState>) -> Result<pve::HostLive, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.host_live().await
+}
+
+#[tauri::command]
+async fn pve_host_rrd(
+    state: tauri::State<'_, PveState>,
+    timeframe: String,
+) -> Result<Vec<pve::RrdPoint>, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.host_rrd(&timeframe).await
+}
+
+#[tauri::command]
+async fn pve_vm_live(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+) -> Result<pve::VmLive, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.vm_live(vmid).await
+}
+
+#[tauri::command]
+async fn pve_vm_rrd(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+    timeframe: String,
+) -> Result<Vec<pve::VmRrdPoint>, String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.vm_rrd(vmid, &timeframe).await
+}
+
+#[tauri::command]
+async fn pve_gpu_metrics() -> Option<pve::GpuMetrics> {
+    pve::PveClient::gpu_metrics().await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -338,6 +383,11 @@ pub fn run() {
             pve_snapshot_create,
             pve_snapshot_rollback,
             pve_snapshot_delete,
+            pve_host_live,
+            pve_host_rrd,
+            pve_vm_live,
+            pve_vm_rrd,
+            pve_gpu_metrics,
             browser_open,
             browser_close,
             browser_close_all,
