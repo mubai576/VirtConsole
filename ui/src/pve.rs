@@ -112,8 +112,16 @@ fn build_client() -> reqwest::Client {
 
 impl PveClient {
     pub fn new(auth: &PveAuth) -> Self {
+        let host = auth.host.trim().to_string();
+        // 保留 mock:// 原样（trim 尾部 '/' 会破坏 scheme）
+        let is_mock = host.starts_with("mock://");
+        let base = if is_mock {
+            "mock://".to_string()
+        } else {
+            host.trim_end_matches('/').to_string()
+        };
         Self {
-            base: auth.host.trim_end_matches('/').to_string(),
+            base,
             node: auth.node.clone(),
             auth: auth.clone(),
             ticket: None,
@@ -200,15 +208,18 @@ impl PveClient {
     }
 
     pub async fn vm_detail(&self, vmid: u32) -> Result<VmDetail, String> {
+        // 注意：VM 配置端点是 /qemu/{vmid}/config；
+        // 裸 /qemu/{vmid} 返回的是子目录列表（config/status/...）
         let cfg = self
-            .get(&format!("/api2/json/nodes/{}/qemu/{vmid}", self.node))
+            .get(&format!("/api2/json/nodes/{}/qemu/{vmid}/config", self.node))
             .await?;
         let cur = self
             .get(&format!("/api2/json/nodes/{}/qemu/{vmid}/status/current", self.node))
             .await?;
         let c = &cfg["data"];
-        let cores = c["cores"].as_u64().unwrap_or(0) as u32;
-        let memory = c["memory"].as_u64().unwrap_or(0) as u32;
+        // PVE 的 /config 里 memory 可能是字符串（如 "2048"），统一健壮解析
+        let cores = as_u64(&c["cores"]).unwrap_or(0) as u32;
+        let memory = as_u64(&c["memory"]).unwrap_or(0) as u32;
         let vga = c["vga"].as_str().unwrap_or("").to_string();
         let disk = c
             .get("virtio0")
@@ -221,13 +232,7 @@ impl PveClient {
             .as_object()
             .map(|o| o.keys().any(|k| k.starts_with("hostpci")))
             .unwrap_or(false);
-        let mode = if has_hostpci {
-            "模式 3 · 直通满血（V3.0）".into()
-        } else if vga.starts_with("virtio") {
-            "模式 2 · DMABUF 60fps（V2.0）".into()
-        } else {
-            "模式 1 · QMP 办公".into()
-        };
+        let mode = mode_label(&vga, has_hostpci);
         Ok(VmDetail {
             vmid,
             name: c["name"].as_str().unwrap_or("").to_string(),
@@ -546,10 +551,35 @@ impl PveClient {
             return Ok(json!({"data":"UPID:mock:action"}));
         }
         if path.contains("/qemu/") {
-            return Ok(json!({"data":{"name":"Ubuntu 桌面","cores":4,"memory":8192,"vga":"virtio","virtio0":"local-lvm:vm-9000-disk-0,size=32G"}}));
+            // 忠实复刻真实 PVE：/config 才是配置；裸 /qemu/{vmid} 是子目录列表
+            let after = path.split("/qemu/").nth(1).unwrap_or("");
+            if after.ends_with("/config") {
+                // memory 用字符串模拟真实 PVE 行为
+                return Ok(json!({"data":{"name":"Ubuntu 桌面","cores":4,"memory":"8192","vga":"virtio","virtio0":"local-lvm:vm-9000-disk-0,size=32G"}}));
+            }
+            if !after.contains('/') {
+                return Ok(json!({"data":[{"subdir":"config"},{"subdir":"status"}]}));
+            }
+            return Ok(json!({"data":{}}));
         }
         Ok(json!({"data":{}}))
     }
+}
+
+/// 采集模式判定（对应 PRD 2.1.4 三模）。
+fn mode_label(vga: &str, has_hostpci: bool) -> String {
+    if has_hostpci {
+        "模式 3 · 直通满血（V3.0）".to_string()
+    } else if vga.starts_with("virtio") {
+        "模式 2 · DMABUF 60fps（V2.0）".to_string()
+    } else {
+        "模式 1 · QMP 办公".to_string()
+    }
+}
+
+/// 兼容数字或字符串的数字解析（PVE 部分字段返回字符串数字）。
+fn as_u64(v: &Value) -> Option<u64> {
+    v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
 async fn parse_resp(resp: reqwest::Response) -> Result<Value, String> {
@@ -559,4 +589,117 @@ async fn parse_resp(resp: reqwest::Response) -> Result<Value, String> {
         return Err(format!("PVE 返回 {status}: {text}"));
     }
     serde_json::from_str(&text).map_err(|e| format!("响应解析失败: {e} :: {text}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_client() -> PveClient {
+        PveClient::new(&PveAuth {
+            method: "token".into(),
+            host: "mock://".into(),
+            node: "pve".into(),
+            token: None,
+            username: None,
+            password: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn list_entities_host_first_with_parsed_metrics() {
+        let c = mock_client();
+        let ents = c.list_entities().await.unwrap();
+        assert_eq!(ents.len(), 4);
+        assert_eq!(ents[0].kind, "host");
+        assert_eq!(ents[0].node, "pve");
+        // mock cpu=0.42 → 42%
+        assert!((ents[0].cpu.unwrap() - 42.0).abs() < 0.01);
+        // VMs：cpu 0.05 → 5%
+        let vm9000 = ents.iter().find(|e| e.vmid == Some(9000)).unwrap();
+        assert_eq!(vm9000.status, "running");
+        assert!((vm9000.cpu.unwrap() - 5.0).abs() < 0.01);
+        assert_eq!(vm9000.mem_total, Some(8_589_934_592.0));
+    }
+
+    #[test]
+    fn mode_label_three_modes() {
+        assert_eq!(mode_label("std", false), "模式 1 · QMP 办公");
+        assert_eq!(mode_label("virtio", false), "模式 2 · DMABUF 60fps（V2.0）");
+        assert_eq!(mode_label("virtio-gl", false), "模式 2 · DMABUF 60fps（V2.0）");
+        assert_eq!(mode_label("qxl", true), "模式 3 · 直通满血（V3.0）");
+        // 直通优先于 vga
+        assert_eq!(mode_label("virtio", true), "模式 3 · 直通满血（V3.0）");
+    }
+
+    #[tokio::test]
+    async fn vm_detail_parses_config_and_status() {
+        let c = mock_client();
+        let d = c.vm_detail(9000).await.unwrap();
+        // 非空断言：若误用裸 /qemu/{vmid}（子目录列表）会导致字段全空，此测试能抓住
+        assert!(!d.name.is_empty());
+        assert!(d.cores > 0);
+        assert!(d.memory > 0);
+        assert!(!d.vga.is_empty());
+        assert!(d.disk.contains("32G"));
+        assert_eq!(d.status, "running");
+        assert!(d.mode.contains("模式 2"));
+    }
+
+    #[tokio::test]
+    async fn snapshots_parsed_from_mock() {
+        let c = mock_client();
+        let snaps = c.snapshots(9000).await.unwrap();
+        assert_eq!(snaps.len(), 2);
+        assert_eq!(snaps[0].name, "基装");
+        assert_eq!(snaps[0].state, "ok");
+    }
+
+    #[tokio::test]
+    async fn host_rrd_cpu_converted_to_percent() {
+        let c = mock_client();
+        let rrd = c.host_rrd("hour").await.unwrap();
+        assert_eq!(rrd.len(), 60);
+        let first = &rrd[0];
+        // mock cpu 为 0.x 分数 → 已乘 100
+        assert!(first.cpu.unwrap() > 10.0 && first.cpu.unwrap() < 100.0);
+        assert!(first.mem.is_some());
+        assert!(first.netin.is_some());
+        assert!(first.io.is_some());
+    }
+
+    #[tokio::test]
+    async fn vm_rrd_has_disk_and_net_fields() {
+        let c = mock_client();
+        let rrd = c.vm_rrd(9000, "hour").await.unwrap();
+        assert_eq!(rrd.len(), 60);
+        let last = &rrd[rrd.len() - 1];
+        assert!(last.diskread.is_some());
+        assert!(last.diskwrite.is_some());
+        assert!(last.netin.is_some());
+        assert!(last.netout.is_some());
+    }
+
+    #[tokio::test]
+    async fn vm_action_and_snapshot_ops_ok() {
+        let c = mock_client();
+        c.vm_action(9000, "start").await.unwrap();
+        c.vm_action(9000, "shutdown").await.unwrap();
+        c.snapshot_create(9000, "snap-1").await.unwrap();
+        c.snapshot_rollback(9000, "snap-1").await.unwrap();
+        c.snapshot_delete(9000, "snap-1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_pve_unreachable_returns_error() {
+        let mut c = PveClient::new(&PveAuth {
+            method: "token".into(),
+            host: "https://127.0.0.1:1".into(),
+            node: "pve".into(),
+            token: Some("x!y=z".into()),
+            username: None,
+            password: None,
+        });
+        assert!(c.connect().await.is_err());
+    }
 }

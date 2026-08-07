@@ -11,6 +11,9 @@ mod config;
 mod pve;
 mod qmp;
 mod terminal;
+mod testmode;
+
+use serde::Deserialize;
 
 use std::sync::Arc;
 
@@ -377,6 +380,39 @@ async fn term_resize(
     terminal::resize(&state, rows, cols).await
 }
 
+// ===== 测试模式 =====
+
+#[derive(Deserialize)]
+struct TestResult {
+    name: String,
+    pass: bool,
+    detail: String,
+}
+
+#[tauri::command]
+fn test_mode() -> bool {
+    testmode::enabled()
+}
+
+#[tauri::command]
+fn test_report(app: tauri::AppHandle, results: Vec<TestResult>) {
+    testmode::report_received();
+    let total = results.len();
+    let passed = results.iter().filter(|r| r.pass).count();
+    for r in &results {
+        eprintln!(
+            "[TEST] {} {} :: {}",
+            if r.pass { "PASS" } else { "FAIL" },
+            r.name,
+            r.detail
+        );
+    }
+    eprintln!("[TEST] 结果 {passed}/{total} 通过");
+    let code = if passed == total && total > 0 { 0 } else { 1 };
+    let _ = app.cleanup_before_exit();
+    std::process::exit(code);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -385,6 +421,7 @@ pub fn run() {
         .manage(PveState::default())
         .manage(TermState::default())
         .setup(|app| {
+            testmode::spawn_watchdog();
             // 验证/演示钩子：VIRTCONSOLE_BROWSER_AUTOOPEN 指定启动后自动打开的网址
             if let Ok(url) = std::env::var("VIRTCONSOLE_BROWSER_AUTOOPEN") {
                 let app_handle = app.handle().clone();
@@ -430,6 +467,8 @@ pub fn run() {
             term_stop,
             term_input,
             term_resize,
+            test_mode,
+            test_report,
             browser_open,
             browser_close,
             browser_close_all,

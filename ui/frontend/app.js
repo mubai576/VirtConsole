@@ -200,9 +200,21 @@ function boot() {
       if (msg.includes("Mock")) setConnState("err");
     })
     .catch((e) => toast("PVE 连接失败: " + e));
-  // 开机直连（config.autoconnect_vmid，回退环境变量）
-  invoke("boot_vmid").then((vmid) => {
-    if (vmid) enterConsole(vmid);
+  // 测试模式：加载全流程测试驱动；否则处理开机直连
+  invoke("test_mode").then((t) => {
+    if (t) {
+      import("./test/driver.js")
+        .then((m) => m.run())
+        .catch((e) => {
+          invoke("test_report", {
+            results: [{ name: "driver_load", pass: false, detail: String(e) }],
+          }).catch(() => {});
+        });
+      return;
+    }
+    invoke("boot_vmid").then((vmid) => {
+      if (vmid) enterConsole(vmid);
+    });
   });
 }
 

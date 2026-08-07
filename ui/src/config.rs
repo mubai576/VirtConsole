@@ -78,18 +78,74 @@ pub fn config_path(app: &AppHandle) -> PathBuf {
 }
 
 pub fn load(app: &AppHandle) -> Config {
-    let p = config_path(app);
-    std::fs::read_to_string(&p)
+    load_from(&config_path(app))
+}
+
+pub fn save(app: &AppHandle, cfg: &Config) -> Result<(), String> {
+    save_to(&config_path(app), cfg)
+}
+
+/// 纯路径读取（便于测试）
+pub fn load_from(path: &std::path::Path) -> Config {
+    std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-pub fn save(app: &AppHandle, cfg: &Config) -> Result<(), String> {
-    let p = config_path(app);
-    if let Some(dir) = p.parent() {
+/// 纯路径写入（便于测试）
+pub fn save_to(path: &std::path::Path, cfg: &Config) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(&p, json).map_err(|e| format!("写入配置失败: {e}"))
+    std::fs::write(path, json).map_err(|e| format!("写入配置失败: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("vc-test-{}", std::process::id()));
+        let path = dir.join(CONFIG_FILE);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut cfg = Config::default();
+        cfg.theme = "light".into();
+        cfg.ui_scale = "2k".into();
+        cfg.capture_fps = 15;
+        cfg.autoconnect_vmid = Some(9000);
+        cfg.pve = Some(PveAuth {
+            method: "password".into(),
+            host: "https://192.168.0.20:8006".into(),
+            node: "hdmi".into(),
+            token: None,
+            username: Some("root@pam".into()),
+            password: Some("secret".into()),
+        });
+        save_to(&path, &cfg).unwrap();
+
+        let loaded = load_from(&path);
+        assert_eq!(loaded.theme, "light");
+        assert_eq!(loaded.ui_scale, "2k");
+        assert_eq!(loaded.capture_fps, 15);
+        assert_eq!(loaded.autoconnect_vmid, Some(9000));
+        let pve = loaded.pve.unwrap();
+        assert_eq!(pve.node, "hdmi");
+        assert_eq!(pve.username.as_deref(), Some("root@pam"));
+        assert_eq!(pve.password.as_deref(), Some("secret"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_file_yields_default() {
+        let p = std::env::temp_dir().join(format!("vc-missing-{}", std::process::id()));
+        let cfg = load_from(&p);
+        assert_eq!(cfg.theme, "dark");
+        assert_eq!(cfg.capture_fps, 10);
+        assert!(cfg.pve.is_none());
+    }
 }
