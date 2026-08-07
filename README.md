@@ -16,6 +16,10 @@ Tauri 主界面骨架已完成：十英尺 UI（电视 / PS5 / Xbox / Apple TV �
 **内置浏览器已实现**：每个标签页 = 独立 Webview 窗口，支持任意 http/https
 页面（含 PVE 后台）；电视风格地址栏 + 快速链接 + 标签条。
 
+> **V1.0 功能状态**：设计稿见 [docs/V1.0-UI与功能设计.md](docs/V1.0-UI与功能设计.md)。
+> P1 设计系统+导航重构 / P2 PVE 运维闭环 / P3 实体监控 / P4 宿主终端 / P5 设置 均已实现
+> 并部署至真机，详见 [docs/自动化测试.md](docs/自动化测试.md)（测试模式插桩，20 场景 E2E 真机通过）。
+
 - Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
 - 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI
 - 启动前环境自检：GPU 缺失、Wayland 未就绪时输出明确的中文错误并正常退出，**不崩溃**
@@ -96,8 +100,22 @@ journalctl -u virtconsole -f
 `scripts/check.sh` 提供同类的安装前自检（GPU / 渲染节点、Weston、seatd、
 Wayland socket、内核模块）。
 
+## 测试
+
+```bash
+# 单元测试（离线，含 pve 解析 / config 读写 / qmp 协议）
+cargo test --workspace
+
+# 全流程 E2E（测试模式：20 场景，有真实 PVE 配置则连真实后端）
+VIRTCONSOLE_TEST=1 cargo run -p vc-ui
+echo "exit=$?"   # 0 全过 / 1 有失败 / 2 看门狗超时
+```
+
+详见 [docs/自动化测试.md](docs/自动化测试.md)。
+
 ## 下一步
 
-1. Tauri 界面接入 QMP：VM 画面推送 Canvas + 键鼠指令经 IPC 下发（复用同一条 QMP 连接）
-2. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）
-3. 画面模式切换（办公 / 游戏 / 直通）与多 VM 支持
+1. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）—— V1.0 已延后（设计保留）
+2. 画面模式切换（办公 / 游戏 / 直通）—— 模式 1 已接入，模式 2/3 待 V2.0/V3.0
+3. V2.0 前置技术验证：dbus-display + dmabuf 链路真机 spike
+4. VM 终端（串口控制台）待 V2.0+
