@@ -457,15 +457,16 @@ function entityKey(e) {
     }
     if (e.key === "Enter" || e.key === "ArrowDown") {
       if (hasFocusableContent()) {
+        // 宿主终端：直接接管键盘焦点（row 保持 nav，退出后 ←→ 立即可用）
+        if (fstate.currentEntity.kind === "host" && fstate.sub === 2) {
+          if (!termActive) activateTerminal();
+          return true;
+        }
         fstate.row = "content";
         fstate.cidx = 0;
         clearNavFocus();
         updateContentFocus();
         if (fstate.sub === 1 && monController) monController.setMetric(fstate.cidx);
-        // 宿主终端：重新接管焦点（Exit 释放后可再次聚焦）
-        if (fstate.currentEntity.kind === "host" && fstate.sub === 2 && !termActive) {
-          activateTerminal();
-        }
       }
       return true;
     }

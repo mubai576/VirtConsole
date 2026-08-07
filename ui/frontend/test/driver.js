@@ -481,6 +481,23 @@ async function suiteE() {
     assert(d2.sub !== 2, `退出按钮后导航未恢复 sub=${d2.sub}`);
     await goHome();
   });
+  await step("E8_reenter_terminal", async () => {
+    await openVmEntity(0, 2);
+    await wait(300);
+    ctrlAltQ(); await flush(200); // 释放焦点
+    let d = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d.termActive === false, "初始未释放");
+    key("Enter"); await flush(100); // 重新聚焦
+    d = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d.termActive === true, `Enter 未重新聚焦 termActive=${d.termActive}`);
+    assert(!!q(".xterm"), "重新聚焦后终端丢失");
+    // 再次退出后 ←→ 应直接可用（row 保持 nav）
+    ctrlAltQ(); await flush(200);
+    key("ArrowRight"); await flush(120);
+    d = window.__vcDebug ? window.__vcDebug() : {};
+    assert(d.sub !== 2, `重新聚焦后再退出，←→ 导航异常 sub=${d.sub}`);
+    await goHome();
+  });
 }
 
 // ===== F. 浏览器 =====
