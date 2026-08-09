@@ -287,6 +287,7 @@ function vmOps() {
       <button class="btn btn-ghost" data-op="start">启动</button>
       <button class="btn btn-danger" data-op="stop">强制停止</button>
       <button class="btn btn-ghost" data-op="snap">新建快照</button>
+      <button class="btn btn-ghost" data-op="dbus">dbus 画面采集</button>
     </div>
     <div class="panel-title" style="margin-top:24px;">快照</div>
     <div class="vlist" id="vm-snapshots"></div>`;
@@ -376,6 +377,18 @@ async function doAction(op) {
   const vmid = e.vmid;
   if (op === "console") {
     await enterConsole(vmid);
+    return;
+  }
+  if (op === "dbus") {
+    // V2.0：dbus-display 画面采集（需 VM 以 -display dbus 启动）
+    try {
+      const busAddr = null; // 走 session bus
+      await invoke("capture_start", { busAddr });
+      await enterConsole(vmid);
+      toast("dbus 画面采集已启动");
+    } catch (err) {
+      toast("dbus 采集启动失败: " + err + "（VM 需以 -display dbus 启动）");
+    }
     return;
   }
   if (op === "snap") {

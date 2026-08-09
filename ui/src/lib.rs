@@ -7,6 +7,8 @@ use serde_json::json;
 use tauri::{Emitter, Manager};
 
 mod browser;
+#[cfg(unix)]
+mod capture;
 mod config;
 mod pve;
 mod qmp;
@@ -18,6 +20,8 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use browser::BrowserState;
+#[cfg(unix)]
+use capture::CaptureState;
 use qmp::QmpState;
 use terminal::TermState;
 use tokio::sync::Mutex;
@@ -142,6 +146,31 @@ async fn vm_input_text(
 #[tauri::command]
 async fn vm_status(state: tauri::State<'_, QmpState>) -> Result<String, String> {
     Ok(qmp::status(&state).await)
+}
+
+// ===== V2.0 dbus-display 采集 =====
+
+#[cfg(unix)]
+#[tauri::command]
+async fn capture_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureState>,
+    bus_addr: Option<String>,
+) -> Result<String, String> {
+    capture::start(app, &state, bus_addr).await
+}
+
+#[cfg(unix)]
+#[tauri::command]
+async fn capture_stop(state: tauri::State<'_, CaptureState>) -> Result<(), String> {
+    capture::stop(&state).await;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tauri::command]
+fn capture_status(state: tauri::State<'_, CaptureState>) -> bool {
+    state.is_on()
 }
 
 // ===== 配置 =====
@@ -432,13 +461,26 @@ fn test_report(app: tauri::AppHandle, results: Vec<TestResult>) {
     std::process::exit(code);
 }
 
+/// 注册 dbus-display 采集状态（仅 Linux）
+#[cfg(unix)]
+fn manage_capture<R: tauri::Runtime>(b: tauri::Builder<R>) -> tauri::Builder<R> {
+    b.manage(CaptureState::default())
+}
+
+#[cfg(not(unix))]
+fn manage_capture<R: tauri::Runtime>(b: tauri::Builder<R>) -> tauri::Builder<R> {
+    b
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(QmpState::default())
         .manage(BrowserState::default())
         .manage(PveState::default())
-        .manage(TermState::default())
+        .manage(TermState::default());
+    let builder = manage_capture(builder);
+    builder
         .setup(|app| {
             testmode::spawn_watchdog();
             // 验证/演示钩子：VIRTCONSOLE_BROWSER_AUTOOPEN 指定启动后自动打开的网址
@@ -463,6 +505,12 @@ pub fn run() {
             vm_input_key,
             vm_input_text,
             vm_status,
+            #[cfg(unix)]
+            capture_start,
+            #[cfg(unix)]
+            capture_stop,
+            #[cfg(unix)]
+            capture_status,
             get_config,
             set_theme,
             set_ui_scale,

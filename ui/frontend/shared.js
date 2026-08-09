@@ -144,6 +144,8 @@ export function exitConsole() {
   consoleActive = false;
   $("#console-layer").classList.add("hidden");
   invoke("vm_disconnect").catch(() => {});
+  // V2.0：退出控制台时同步停止 dbus-display 采集
+  invoke("capture_stop").catch(() => {});
   resetStatusBar();
   window.focus();
   document.body.focus();
