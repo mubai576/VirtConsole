@@ -566,12 +566,12 @@ impl PveClient {
     }
 }
 
-/// 采集模式判定（对应 PRD 2.1.4 三模）。
+/// 采集模式判定（对应 PRD 2.1.4 三模；模式 2 实际用像素事件路径，见 M2.5 spike 结论）。
 fn mode_label(vga: &str, has_hostpci: bool) -> String {
     if has_hostpci {
         "模式 3 · 直通满血（V3.0）".to_string()
     } else if vga.starts_with("virtio") {
-        "模式 2 · DMABUF 60fps（V2.0）".to_string()
+        "模式 2 · 像素流 60fps（V2.0）".to_string()
     } else {
         "模式 1 · QMP 办公".to_string()
     }
@@ -625,8 +625,8 @@ mod tests {
     #[test]
     fn mode_label_three_modes() {
         assert_eq!(mode_label("std", false), "模式 1 · QMP 办公");
-        assert_eq!(mode_label("virtio", false), "模式 2 · DMABUF 60fps（V2.0）");
-        assert_eq!(mode_label("virtio-gl", false), "模式 2 · DMABUF 60fps（V2.0）");
+        assert_eq!(mode_label("virtio", false), "模式 2 · 像素流 60fps（V2.0）");
+        assert_eq!(mode_label("virtio-gl", false), "模式 2 · 像素流 60fps（V2.0）");
         assert_eq!(mode_label("qxl", true), "模式 3 · 直通满血（V3.0）");
         // 直通优先于 vga
         assert_eq!(mode_label("virtio", true), "模式 3 · 直通满血（V3.0）");

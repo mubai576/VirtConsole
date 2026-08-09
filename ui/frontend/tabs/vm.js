@@ -269,12 +269,17 @@ function hostOverview() {
 }
 
 function vmOverview() {
+  // 模式徽标：模式 2（virtio）可实际操作进入采集；模式 1/3 为状态展示
+  const isMode2 = detail.mode && detail.mode.includes("模式 2");
+  const modeBadge = isMode2
+    ? `<button class="btn btn-ghost" id="vm-enter-capture" style="font-size:13px;padding:6px 14px;margin-left:8px;">进入采集</button>`
+    : "";
   return `<div class="info-grid">
     <div class="info-cell"><div class="k">CPU 核心</div><div class="v">${detail.cores} 核</div></div>
     <div class="info-cell"><div class="k">内存</div><div class="v">${detail.memory} MB</div></div>
     <div class="info-cell"><div class="k">磁盘</div><div class="v">${detail.disk || "--"}</div></div>
     <div class="info-cell"><div class="k">显卡</div><div class="v">${detail.vga || "--"}</div></div>
-    <div class="info-cell"><div class="k">采集模式</div><div class="v" style="color:var(--accent);">${detail.mode}</div></div>
+    <div class="info-cell"><div class="k">采集模式</div><div class="v" style="color:var(--accent);">${detail.mode}${modeBadge}</div></div>
   </div>`;
 }
 
@@ -295,6 +300,21 @@ function vmOps() {
 
 function bindSubView(sv) {
   focusContentList = [];
+  // 模式 2 概览页："进入采集"按钮
+  const enterCapture = sv.querySelector("#vm-enter-capture");
+  if (enterCapture) {
+    enterCapture.addEventListener("click", async () => {
+      try {
+        await invoke("capture_start", { busAddr: null });
+        toast("dbus 采集已启动");
+      } catch (e) {
+        toast("采集启动失败: " + e + "（VM 需以 -display dbus 启动）");
+      }
+    });
+    focusContentList = [enterCapture];
+    if (fstate.row === "content") updateContentFocus();
+    return;
+  }
   const isMonitor = fstate.currentEntity && fstate.sub === 1 && monController;
   if (isMonitor) {
     // 监控卡片点击/悬停由 monitor.startMonitor 内部绑定；此处仅同步当前卡片

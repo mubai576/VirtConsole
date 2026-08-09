@@ -64,6 +64,15 @@ export const suiteC = {
       assert(grid.includes("CPU") && grid.includes("内存"), "概览字段缺失");
       await goHome();
     });
+    await step("C9b_vm_mode2_badge", async () => {
+      await openVmEntity(1, 0);
+      const grid = q(".info-grid")?.textContent || "";
+      // mock 数据 VM 为 virtio 显卡 → 模式 2
+      assert(grid.includes("模式 2"), "模式 2 徽标缺失");
+      const btn = q("#vm-enter-capture");
+      assert(!!btn, "进入采集按钮缺失");
+      await goHome();
+    });
     await step("C10_ops_button_nav", async () => {
       await openVmEntity(1, 2);
       const ops = qa('#vm-ops-row .btn');
