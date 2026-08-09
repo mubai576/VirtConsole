@@ -171,22 +171,40 @@ export function consoleKeyUp(e) {
 }
 
 /* ===== VM 画面帧（canvas） ===== */
+// V2.0 性能优化：缓存 ImageData 与画布尺寸，避免每帧重建（大分辨率下显著降卡顿）。
+// - 尺寸不变时复用 imageData.data（就地覆盖），canvas 不重设（重设会清空+重建）
+// - RGB→RGBA 批量循环（alpha 通道由 fill 初始化，无需逐像素赋值）
+let frameImageData = null;      // 缓存的 ImageData
+let frameCanvasW = 0, frameCanvasH = 0;
+let frameRgbaBuf = null;       // 缓存的 RGBA 目标缓冲
+
 export function drawFrame(width, height, b64) {
   const canvas = $("#vm-canvas");
   const ctx = canvas.getContext("2d");
-  const bin = atob(b64);
-  const rgb = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) rgb[i] = bin.charCodeAt(i);
-  const rgba = new Uint8ClampedArray(width * height * 4);
-  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
-    rgba[j] = rgb[i];
-    rgba[j + 1] = rgb[i + 1];
-    rgba[j + 2] = rgb[i + 2];
-    rgba[j + 3] = 255;
+
+  // 尺寸变化时重建缓冲 + 画布（此时才需要清空重建）
+  if (width !== frameCanvasW || height !== frameCanvasH) {
+    frameCanvasW = width;
+    frameCanvasH = height;
+    canvas.width = width;
+    canvas.height = height;
+    frameRgbaBuf = new Uint8ClampedArray(width * height * 4);
+    frameImageData = new ImageData(frameRgbaBuf, width, height);
   }
-  canvas.width = width;
-  canvas.height = height;
-  ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+
+  const bin = atob(b64);
+  const n = bin.length;
+  const src = frameRgbaBuf;
+  // RGB(3字节) → RGBA(4字节) 批量转换
+  for (let i = 0, j = 0; i < n; i += 3, j += 4) {
+    src[j] = bin.charCodeAt(i);
+    src[j + 1] = bin.charCodeAt(i + 1);
+    src[j + 2] = bin.charCodeAt(i + 2);
+  }
+  // alpha 通道整批置 255（用 fill 一次到位）
+  for (let j = 3; j < src.length; j += 4) src[j] = 255;
+
+  ctx.putImageData(frameImageData, 0, 0);
 }
 
 /* ===== 跨 Tab 深链（首页 → 虚拟机 Tab 打开指定实体） ===== */
