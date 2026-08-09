@@ -301,6 +301,31 @@ impl PveClient {
         .map(|_| ())
     }
 
+    // ===== dbus-display 采集启用（V2.0） =====
+
+    /// 给 VM 写入 args: -display dbus（PVE 启动时 QEMU 同时开 dbus 与默认 vnc，已验证共存）。
+    /// 需 VM 停机才能改配置。
+    pub async fn vm_enable_dbus(&self, vmid: u32) -> Result<(), String> {
+        self.put(
+            &format!("/api2/json/nodes/{}/qemu/{vmid}/config", self.node),
+            json!({ "args": "-display dbus" }),
+            true,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// 移除 VM 的 args（恢复默认，禁用 dbus-display）。
+    pub async fn vm_disable_dbus(&self, vmid: u32) -> Result<(), String> {
+        self.put(
+            &format!("/api2/json/nodes/{}/qemu/{vmid}/config", self.node),
+            json!({ "delete": "args" }),
+            true,
+        )
+        .await
+        .map(|_| ())
+    }
+
     // ===== 监控（实时 + 历史曲线） =====
 
     /// 宿主机实时状态（/nodes/{node}/status）
@@ -458,7 +483,6 @@ impl PveClient {
         }
         parse_resp(rb.send().await.map_err(|e| format!("HTTP 错误: {e}"))?).await
     }
-
     async fn delete(&self, path: &str, with_csrf: bool) -> Result<Value, String> {
         if self.is_mock() {
             return self.mock(path).await;
@@ -466,6 +490,30 @@ impl PveClient {
         let mut rb = self
             .http
             .delete(&format!("{}{}", self.base, path));
+        if let Some(t) = &self.ticket {
+            rb = rb.header("Cookie", format!("PVEAuthCookie={t}"));
+        }
+        if with_csrf {
+            if let Some(c) = &self.csrf {
+                rb = rb.header("CSRFPreventionToken", c);
+            }
+        }
+        if self.auth.method == "token" {
+            if let Some(tk) = &self.auth.token {
+                rb = rb.header("Authorization", format!("PVEAPIToken={tk}"));
+            }
+        }
+        parse_resp(rb.send().await.map_err(|e| format!("HTTP 错误: {e}"))?).await
+    }
+
+    async fn put(&self, path: &str, body: Value, with_csrf: bool) -> Result<Value, String> {
+        if self.is_mock() {
+            return self.mock(path).await;
+        }
+        let mut rb = self
+            .http
+            .put(&format!("{}{}", self.base, path))
+            .json(&body);
         if let Some(t) = &self.ticket {
             rb = rb.header("Cookie", format!("PVEAuthCookie={t}"));
         }

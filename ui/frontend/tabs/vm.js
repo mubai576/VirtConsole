@@ -293,6 +293,8 @@ function vmOps() {
       <button class="btn btn-danger" data-op="stop">强制停止</button>
       <button class="btn btn-ghost" data-op="snap">新建快照</button>
       <button class="btn btn-ghost" data-op="dbus">dbus 画面采集</button>
+      <button class="btn btn-ghost" data-op="enable-dbus">启用 dbus 采集</button>
+      <button class="btn btn-ghost" data-op="disable-dbus">禁用 dbus 采集</button>
     </div>
     <div class="panel-title" style="margin-top:24px;">快照</div>
     <div class="vlist" id="vm-snapshots"></div>`;
@@ -408,6 +410,27 @@ async function doAction(op) {
       toast("dbus 画面采集已启动");
     } catch (err) {
       toast("dbus 采集启动失败: " + err + "（VM 需以 -display dbus 启动）");
+    }
+    return;
+  }
+  if (op === "enable-dbus" || op === "disable-dbus") {
+    // 写入/移除 PVE args: -display dbus（需 VM 停机）
+    const enable = op === "enable-dbus";
+    if (!(await showConfirm({
+      title: enable ? "启用 dbus 画面采集" : "禁用 dbus 画面采集",
+      desc: enable
+        ? "将给 VM 配置 `args: -display dbus`。需 VM 停机生效，重启后即可用 V2.0 像素流采集。"
+        : "将移除 VM 的 `args` 配置，恢复默认显示。需 VM 停机生效。",
+      confirmText: enable ? "启用" : "禁用",
+      danger: !enable,
+    }))) return;
+    try {
+      if (enable) await invoke("pve_vm_enable_dbus", { vmid });
+      else await invoke("pve_vm_disable_dbus", { vmid });
+      toast(enable ? "已启用 dbus 采集配置（重启 VM 生效）" : "已禁用 dbus 采集配置");
+      await loadDetail();
+    } catch (err) {
+      toast(enable ? "启用失败: " + err : "禁用失败: " + err);
     }
     return;
   }

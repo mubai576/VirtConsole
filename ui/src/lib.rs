@@ -342,6 +342,26 @@ async fn pve_snapshot_delete(
     cli.snapshot_delete(vmid, &name).await
 }
 
+#[tauri::command]
+async fn pve_vm_enable_dbus(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+) -> Result<(), String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.vm_enable_dbus(vmid).await
+}
+
+#[tauri::command]
+async fn pve_vm_disable_dbus(
+    state: tauri::State<'_, PveState>,
+    vmid: u32,
+) -> Result<(), String> {
+    let mut guard = state.client.lock().await;
+    let cli = guard.as_mut().ok_or("未连接 PVE")?;
+    cli.vm_disable_dbus(vmid).await
+}
+
 // ===== 监控 =====
 
 #[tauri::command]
@@ -525,6 +545,8 @@ pub fn run() {
             pve_snapshot_create,
             pve_snapshot_rollback,
             pve_snapshot_delete,
+            pve_vm_enable_dbus,
+            pve_vm_disable_dbus,
             pve_host_live,
             pve_host_rrd,
             pve_vm_live,
