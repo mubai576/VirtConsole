@@ -2,7 +2,7 @@
 // 仅 Linux 目标支持（capture_* 命令 cfg(unix)）；Windows 开发机自动跳过。
 //  - 真机且有 dbus-display VM 时：capture_start 成功
 //  - 无 dbus VM 时：返回明确错误（不崩溃），capture_status 为 false
-import { invoke } from "../../shared.js";
+import { invoke, drawFrame } from "../../shared.js";
 import { step, assert } from "../framework.js";
 
 async function captureAvailable() {
@@ -19,6 +19,36 @@ export const suiteL = {
   id: "dbus",
   label: "dbus 画面采集",
   async run() {
+    // L5 先跑：纯前端渲染性能，不依赖 capture 命令（Windows/Linux 均可验证）
+    // 预算：目标 30fps（33ms/帧），容忍 <80ms（低端机器余量），>80ms 视为性能不足
+    await step("L5_1080p_draw_perf", async () => {
+      const W = 1920, H = 1080;
+      // 构造 1080p RGB 渐变帧（2M 像素，近似真实画面体积）
+      const rgb = new Uint8Array(W * H * 3);
+      for (let i = 0; i < W * H * 3; i += 3) {
+        rgb[i] = (i / 3) & 0xff;       // R 渐变
+        rgb[i + 1] = (i / 3 + 85) & 0xff; // G
+        rgb[i + 2] = 255;              // B
+      }
+      // base64 编码
+      let bin = "";
+      for (let i = 0; i < rgb.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, rgb.subarray(i, i + 0x8000));
+      }
+      const b64 = btoa(bin);
+
+      // 预热一次（触发缓冲初始化）
+      drawFrame(W, H, b64);
+      // 测 5 帧平均
+      const N = 5;
+      const t0 = performance.now();
+      for (let i = 0; i < N; i++) drawFrame(W, H, b64);
+      const avg = (performance.now() - t0) / N;
+      // console.error 会落到进程 stderr，可观测具体耗时
+      console.error(`[VC-TEST] 1080p drawFrame ${avg.toFixed(1)}ms/帧`);
+      assert(avg < 80, `1080p drawFrame ${avg.toFixed(1)}ms/帧（>80ms 超预算）`);
+    });
+
     const available = await captureAvailable();
     if (!available) {
       console.log("[VC-TEST] capture_* 命令不可用（非 Linux），套件跳过");
