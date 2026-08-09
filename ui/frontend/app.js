@@ -11,7 +11,7 @@ import { TABS } from "./tabs/index.js";
 import {
   $, toast, invoke, enterConsole, applyTheme, applyScale, applyCaptureScale,
   isConsoleActive, exitConsole, consoleKeyDown, consoleKeyUp,
-  drawFrame, setConnState,
+  drawFrame, drawFrameDirty, setConnState,
 } from "./shared.js";
 import { handleTermExit } from "./terminal.js";
 
@@ -166,7 +166,12 @@ document.addEventListener("keyup", (e) => {
 
 /* ===== 全局事件 ===== */
 window.__TAURI__.event.listen("vm-frame", (ev) => {
-  drawFrame(ev.payload.width, ev.payload.height, ev.payload.data);
+  const p = ev.payload;
+  if (p.type === "dirty") {
+    drawFrameDirty(p.x, p.y, p.width, p.height, p.data);
+  } else {
+    drawFrame(p.width, p.height, p.data);
+  }
 });
 
 window.__TAURI__.event.listen("vm-status", (ev) => {

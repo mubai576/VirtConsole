@@ -45,8 +45,8 @@ trait QemuConsole {
 /// Listener 接口实现：接收画面事件并更新帧缓冲（推送由采集循环周期执行）。
 struct ScanoutListener {
     frame: Arc<StdMutex<Option<FrameBuf>>>,
-    /// 自上次推送后是否有更新（合并高帧率局部更新）
-    dirty: Arc<AtomicBool>,
+    /// 脏区域（合并高帧率局部更新；None=无更新，Some(全帧)=整帧，Some(rect)=局部）
+    dirty: Arc<StdMutex<DirtyState>>,
 }
 
 /// 当前帧缓冲
@@ -58,8 +58,36 @@ struct FrameBuf {
     rgb: Vec<u8>,
 }
 
+/// 推送脏状态
+#[derive(Clone, Copy, Debug)]
+enum DirtyState {
+    /// 无更新
+    None,
+    /// 全帧需要推送
+    Full,
+    /// 局部区域需要推送（x,y,w,h）
+    Rect { x: i32, y: i32, w: i32, h: i32 },
+}
+
+impl DirtyState {
+    /// 合并一个局部脏区域（若已是全帧则保持全帧）
+    fn merge_rect(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        match *self {
+            DirtyState::Full => {}
+            DirtyState::None => *self = DirtyState::Rect { x, y, w, h },
+            DirtyState::Rect { x: rx, y: ry, w: _rw, h: _rh } => {
+                let nx = rx.min(x);
+                let ny = ry.min(y);
+                let nrw = rx.max(x + w) - nx;
+                let nrh = ry.max(y + h) - ny;
+                *self = DirtyState::Rect { x: nx, y: ny, w: nrw, h: nrh };
+            }
+        }
+    }
+}
+
 impl ScanoutListener {
-    fn new(frame: Arc<StdMutex<Option<FrameBuf>>>, dirty: Arc<AtomicBool>) -> Self {
+    fn new(frame: Arc<StdMutex<Option<FrameBuf>>>, dirty: Arc<StdMutex<DirtyState>>) -> Self {
         Self { frame, dirty }
     }
 }
@@ -126,11 +154,11 @@ impl ScanoutListener {
             height,
             rgb,
         });
-        self.dirty.store(true, Ordering::Relaxed);
+        *self.dirty.lock().unwrap() = DirtyState::Full;
         Ok(())
     }
 
-    /// Update：局部像素更新
+    /// Update：局部像素更新（合并脏区域，仅推送变化区域）
     #[zbus(name = "Update")]
     async fn update(
         &mut self,
@@ -145,9 +173,11 @@ impl ScanoutListener {
         let mut guard = self.frame.lock().unwrap();
         if let Some(f) = guard.as_mut() {
             apply_update(f, x, y, width, height, stride, &data);
-            self.dirty.store(true, Ordering::Relaxed);
+            drop(guard);
+            self.dirty.lock().unwrap().merge_rect(x, y, width, height);
+        } else {
+            drop(guard);
         }
-        drop(guard);
         Ok(())
     }
 
@@ -186,7 +216,7 @@ impl ScanoutListener {
     async fn disable(&mut self) -> zbus::fdo::Result<()> {
         eprintln!("[capture] Disable");
         *self.frame.lock().unwrap() = None;
-        self.dirty.store(true, Ordering::Relaxed);
+        *self.dirty.lock().unwrap() = DirtyState::Full;
         Ok(())
     }
 
@@ -217,7 +247,7 @@ pub struct CaptureState {
     pub on: Arc<AtomicBool>,
     pub task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     frame: Arc<StdMutex<Option<FrameBuf>>>,
-    dirty: Arc<AtomicBool>,
+    dirty: Arc<StdMutex<DirtyState>>,
 }
 
 impl Default for CaptureState {
@@ -226,7 +256,7 @@ impl Default for CaptureState {
             on: Arc::new(AtomicBool::new(false)),
             task: Arc::new(Mutex::new(None)),
             frame: Arc::new(StdMutex::new(None)),
-            dirty: Arc::new(AtomicBool::new(false)),
+            dirty: Arc::new(StdMutex::new(DirtyState::None)),
         }
     }
 }
@@ -237,18 +267,45 @@ impl CaptureState {
     }
 }
 
-/// 若帧有更新则推送到前端（合并高频局部更新，供采集循环周期调用）
-fn push_frame(app: &AppHandle, frame: &StdMutex<Option<FrameBuf>>, dirty: &AtomicBool) {
-    if !dirty.swap(false, Ordering::Relaxed) {
+/// 从帧缓冲中截取局部区域的 RGB 数据（供差分推送）
+fn crop_rgb(f: &FrameBuf, x: i32, y: i32, w: i32, h: i32) -> Vec<u8> {
+    let fw = f.width as i32;
+    let row_bytes = (w as usize) * 3;
+    let mut out = Vec::with_capacity(row_bytes * h as usize);
+    for dy in 0..h {
+        let src_off = ((y + dy) * fw + x) as usize * 3;
+        out.extend_from_slice(&f.rgb[src_off..src_off + row_bytes]);
+    }
+    out
+}
+
+/// 若帧有更新则推送到前端（差分：全帧或局部脏区域，供采集循环周期调用）
+fn push_frame(app: &AppHandle, frame: &StdMutex<Option<FrameBuf>>, dirty: &StdMutex<DirtyState>) {
+    let state = std::mem::replace(&mut *dirty.lock().unwrap(), DirtyState::None);
+    if matches!(state, DirtyState::None) {
         return;
     }
     let guard = frame.lock().unwrap();
-    if let Some(f) = guard.as_ref() {
-        let b64 = B64.encode(&f.rgb);
-        let _ = app.emit(
-            "vm-frame",
-            json!({ "width": f.width, "height": f.height, "data": b64 }),
-        );
+    let Some(f) = guard.as_ref() else { return };
+
+    match state {
+        DirtyState::Full => {
+            let b64 = B64.encode(&f.rgb);
+            let _ = app.emit(
+                "vm-frame",
+                json!({ "type": "full", "width": f.width, "height": f.height, "data": b64 }),
+            );
+        }
+        DirtyState::Rect { x, y, w, h } => {
+            // 裁剪脏区域 RGB，只推变化部分（大幅省带宽）
+            let rgb = crop_rgb(f, x, y, w, h);
+            let b64 = B64.encode(&rgb);
+            let _ = app.emit(
+                "vm-frame",
+                json!({ "type": "dirty", "x": x, "y": y, "width": w, "height": h, "data": b64 }),
+            );
+        }
+        DirtyState::None => {}
     }
 }
 
@@ -333,8 +390,8 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
                 // 收到消息即已派发（zbus 内部路由），无需额外处理
                 _ = msgs.next() => {}
                 _ = tick.tick() => {
-                    // 周期合并推送帧（dirty 未置位时零开销）
-                    if task_dirty.load(Ordering::Relaxed) {
+                    // 周期合并推送帧（无更新时零开销）
+                    if !matches!(*task_dirty.lock().unwrap(), DirtyState::None) {
                         push_frame(&task_app, &task_frame, &task_dirty);
                     }
                 }

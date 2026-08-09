@@ -207,6 +207,38 @@ export function drawFrame(width, height, b64) {
   ctx.putImageData(frameImageData, 0, 0);
 }
 
+// V2.0 差分：只更新帧缓冲的局部区域并重绘（省 base64 传输与 GPU 拷贝）
+export function drawFrameDirty(x, y, w, h, b64) {
+  const canvas = $("#vm-canvas");
+  const ctx = canvas.getContext("2d");
+  if (!frameRgbaBuf || w <= 0 || h <= 0) return;
+  const bin = atob(b64);
+  const src = frameRgbaBuf;
+  // 逐行写入局部区域（RGB → RGBA）
+  for (let dy = 0; dy < h; dy++) {
+    const srcRow = dy * w * 3;
+    const dstOff = ((y + dy) * frameCanvasW + x) * 4;
+    for (let dx = 0; dx < w; dx++) {
+      const s = srcRow + dx * 3;
+      const d = dstOff + dx * 4;
+      src[d] = bin.charCodeAt(s);
+      src[d + 1] = bin.charCodeAt(s + 1);
+      src[d + 2] = bin.charCodeAt(s + 2);
+      src[d + 3] = 255;
+    }
+  }
+  // 只重绘脏区域（局部 putImageData，省全量 GPU 拷贝）
+  const patch = ctx.createImageData(w, h);
+  for (let dy = 0; dy < h; dy++) {
+    const sOff = ((y + dy) * frameCanvasW + x) * 4;
+    const dOff = dy * w * 4;
+    for (let dx = 0; dx < w * 4; dx++) {
+      patch.data[dOff + dx] = src[sOff + dx];
+    }
+  }
+  ctx.putImageData(patch, x, y);
+}
+
 /* ===== 跨 Tab 深链（首页 → 虚拟机 Tab 打开指定实体） ===== */
 let vmTarget = null;
 export function setVmTarget(vmid) {

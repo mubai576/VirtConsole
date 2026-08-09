@@ -107,8 +107,14 @@ export const suiteL = {
       await unlisten();
       console.log(`[VC-TEST] 收到 ${frames.length} 帧`);
       if (frames.length > 0) {
+        const types = frames.map((f) => f.type || "full");
+        console.log(`[VC-TEST] 帧类型: ${[...new Set(types)].join(",")}`);
         const f = frames[0];
-        assert(f.width > 0 && f.height > 0, `帧尺寸非法 ${f.width}x${f.height}`);
+        if (f.type === "dirty") {
+          assert(f.x >= 0 && f.y >= 0 && f.width > 0 && f.height > 0, `脏区域坐标非法 ${f.x},${f.y},${f.width}x${f.height}`);
+        } else {
+          assert(f.width > 0 && f.height > 0, `帧尺寸非法 ${f.width}x${f.height}`);
+        }
         assert(typeof f.data === "string" && f.data.length > 0, "帧数据为空");
         assert(true, "收到有效帧");
       } else {
