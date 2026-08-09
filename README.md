@@ -117,11 +117,13 @@ echo "exit=$?"   # 0 全过 / 1 有失败 / 2 看门狗超时
 
 ## 下一步
 
-1. **M2.5 V2.0 前置 spike（进行中）**：真机验证 dbus-display + dmabuf 链路，
-   结论决定 V2.0（60fps 画面）排期。材料已备齐：
-   - 验证计划：[docs/里程碑2.5-V2.0前置技术验证计划.md](docs/里程碑2.5-V2.0前置技术验证计划.md)
-   - QEMU 能力检测：`sudo ./scripts/spike-qemu-check.sh`
-   - Listener 探针：`spike-dbus/`（真机 `cd spike-dbus && cargo build --release` 后运行）
-2. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）—— V1.0 已延后（设计保留）
-3. 画面模式切换（办公 / 游戏 / 直通）—— 模式 1 已接入，模式 2/3 待 V2.0/V3.0
-4. VM 终端（串口控制台）待 V2.0+
+1. **M2.5 V2.0 前置 spike（已验证 ✅）**：dbus-display + dmabuf 链路真机验证通过
+   （C1-C5 全过，PVE 自带 QEMU 11.0.0 支持 dbus-display，免自编译）。
+   关键结论：NVIDIA 私有 DMABUF modifier 不可外部 EGL 导入；Scanout/Update 像素事件路径
+   （gl=off）实测 ~85fps 可用，建议作为 V2.0 基础。
+   详见 [docs/里程碑2.5-V2.0前置技术验证计划.md](docs/里程碑2.5-V2.0前置技术验证计划.md) §五。
+2. **V2.0 规划（待排期）**：以 Scanout/Update 像素路径 + 现有 Canvas 渲染起步，
+   同步评估 linear DMABUF（方案 B）作为性能增强。
+3. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）—— V1.0 已延后（设计保留）
+4. 画面模式切换（办公 / 游戏 / 直通）—— 模式 1 已接入，模式 2 见上，模式 3 待 V3.0
+5. VM 终端（串口控制台）待 V2.0+

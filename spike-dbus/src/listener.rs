@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 use zbus::interface;
 use zbus::zvariant::OwnedFd;
 
+use std::os::unix::io::AsRawFd;
+
 /// 事件统计（帧活性判断用）
 #[derive(Debug, Default)]
 pub struct Stats {
@@ -25,6 +27,10 @@ pub struct Stats {
 pub struct ScanoutListener {
     pub stats: Arc<Mutex<Stats>>,
     pub frame_counter: Arc<AtomicU64>,
+    /// 收到首个 DMABUF 帧时触发的回调（C6 EGL 导入用）
+    pub on_dmabuf: Option<Arc<dyn Fn(i32, u32, u32, u32, u32, u64) + Send + Sync>>,
+    /// 收到 Scanout 像素帧时触发的回调（备选验证：像素数据可读性）
+    pub on_scanout: Option<Arc<dyn Fn(&[u8], u32, u32, u32, u32) + Send + Sync>>,
 }
 
 impl ScanoutListener {
@@ -32,6 +38,8 @@ impl ScanoutListener {
         Self {
             stats: Arc::new(Mutex::new(Stats::default())),
             frame_counter: Arc::new(AtomicU64::new(0)),
+            on_dmabuf: None,
+            on_scanout: None,
         }
     }
 
@@ -86,6 +94,9 @@ impl ScanoutListener {
             pixman_format,
             data.len()
         );
+        if let Some(cb) = &self.on_scanout {
+            cb(&data, width, height, stride, pixman_format);
+        }
         Ok(())
     }
 
@@ -110,6 +121,7 @@ impl ScanoutListener {
     }
 
     /// ScanoutDMABUF：**V2.0 主链路** —— DMABUF 文件描述符零拷贝共享
+    #[zbus(name = "ScanoutDMABUF")]
     async fn scanout_dmabuf(
         &mut self,
         dmabuf: OwnedFd,
@@ -128,10 +140,20 @@ impl ScanoutListener {
             width, height, stride, fourcc_str, fourcc, modifier, y0_top
         );
         Self::probe_dmabuf(&dmabuf, (height as usize) * (stride as usize));
+        if let Some(cb) = &self.on_dmabuf {
+            // dup 一份交给回调，避免与 dmabuf 的所有权冲突
+            let dup = unsafe { libc::dup(dmabuf.as_raw_fd()) };
+            if dup >= 0 {
+                cb(dup, width, height, stride, fourcc, modifier);
+            } else {
+                println!("  [warn] dup 失败，无法导出 dmabuf 给 EGL 测试");
+            }
+        }
         Ok(())
     }
 
     /// UpdateDMABUF：基于当前 DMABUF 的局部更新
+    #[zbus(name = "UpdateDMABUF")]
     async fn update_dmabuf(
         &mut self,
         x: i32,
