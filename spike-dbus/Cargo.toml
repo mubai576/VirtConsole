@@ -1,0 +1,14 @@
+[package]
+name = "spike-dbus"
+version = "0.1.0"
+edition = "2021"
+description = "V2.0 前置 spike：QEMU dbus-display Listener 探针（注册 Listener、接收 Scanout/ScanoutMap/ScanoutDMABUF 事件）"
+
+# 独立 spike 工具，不并入主 workspace（真机单独构建，避免污染统一构建）
+[workspace]
+
+[dependencies]
+zbus = { version = "5", features = ["tokio", "p2p"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+libc = "0.2"
+zvariant = "5"

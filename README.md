@@ -33,7 +33,7 @@ Tauri 主界面骨架已完成：十英尺 UI（电视 / PS5 / Xbox / Apple TV �
 ```text
 VirtConsole/
 ├── Cargo.toml                # Rust workspace
-├── docs/                     # PRD（V1.1）+ 里程碑部署记录
+├── docs/                     # PRD（V1.1）+ 里程碑部署记录 + 测试环境
 ├── host/                     # 宿主机渲染终端（Rust）
 │   ├── Cargo.toml
 │   └── src/
@@ -51,10 +51,12 @@ VirtConsole/
 ├── deploy/                   # systemd 服务单元
 │   ├── virtconsole-weston.service
 │   └── virtconsole.service
+├── spike-dbus/               # V2.0 前置 spike：dbus-display Listener 探针（独立 crate）
 └── scripts/
     ├── install.sh            # 一键安装 / 部署
     ├── check.sh              # 环境自检
-    └── remove.sh             # 卸载（保留系统包）
+    ├── remove.sh             # 卸载（保留系统包）
+    └── spike-qemu-check.sh   # V2.0 spike：QEMU dbus-display / OpenGL 能力检测
 ```
 
 ## 快速开始
@@ -115,7 +117,11 @@ echo "exit=$?"   # 0 全过 / 1 有失败 / 2 看门狗超时
 
 ## 下一步
 
-1. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）—— V1.0 已延后（设计保留）
-2. 画面模式切换（办公 / 游戏 / 直通）—— 模式 1 已接入，模式 2/3 待 V2.0/V3.0
-3. V2.0 前置技术验证：dbus-display + dmabuf 链路真机 spike
+1. **M2.5 V2.0 前置 spike（进行中）**：真机验证 dbus-display + dmabuf 链路，
+   结论决定 V2.0（60fps 画面）排期。材料已备齐：
+   - 验证计划：[docs/里程碑2.5-V2.0前置技术验证计划.md](docs/里程碑2.5-V2.0前置技术验证计划.md)
+   - QEMU 能力检测：`sudo ./scripts/spike-qemu-check.sh`
+   - Listener 探针：`spike-dbus/`（真机 `cd spike-dbus && cargo build --release` 后运行）
+2. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）—— V1.0 已延后（设计保留）
+3. 画面模式切换（办公 / 游戏 / 直通）—— 模式 1 已接入，模式 2/3 待 V2.0/V3.0
 4. VM 终端（串口控制台）待 V2.0+
