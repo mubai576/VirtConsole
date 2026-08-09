@@ -124,6 +124,7 @@ export async function enterConsole(vmid) {
   setCrumb(`VM ${vmid} 控制台`);
   setHint("Ctrl+Alt+Q 返回 · 按键直接输入到虚拟机");
   toast(`正在连接 VM ${vmid} ...`);
+  setupMouseInput(); // V2.0：canvas 鼠标事件转发
   try {
     const res = await invoke("vm_connect", { vmid });
     toast(res);
@@ -152,22 +153,86 @@ export function exitConsole() {
 }
 
 // 控制台键盘：全部转发给 VM（含 Esc），Ctrl+Alt+Q 由 app.js 全局拦截退出
+// V2.0：走 D-Bus Keyboard 接口（capture_input_key，全键盘映射）；回退 QMP
 export function consoleKeyDown(e) {
-  const qcode = SPECIAL_KEYS[e.key];
-  if (qcode) {
-    qmpKey(qcode, true);
-    pressedKeys.add(qcode);
-  } else if (e.key.length === 1) {
-    qmpText(e.key);
+  // 全局退出键（Ctrl+Alt+Q）不转发
+  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "q") return;
+  // 可打印字符 → D-Bus 文本（含修饰）
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    dbusText(e.key);
+    return;
+  }
+  // 特殊键 → D-Bus 全键盘（Linux keycode）
+  if (e.code) {
+    dbusKey(e.code, true);
+    pressedKeys.add(e.code);
+  } else {
+    const qcode = SPECIAL_KEYS[e.key];
+    if (qcode) {
+      qmpKey(qcode, true);
+      pressedKeys.add(qcode);
+    }
   }
 }
 
 export function consoleKeyUp(e) {
-  const qcode = SPECIAL_KEYS[e.key];
-  if (qcode && pressedKeys.has(qcode)) {
-    qmpKey(qcode, false);
-    pressedKeys.delete(qcode);
+  if (e.code && pressedKeys.has(e.code)) {
+    dbusKey(e.code, false);
+    pressedKeys.delete(e.code);
+  } else {
+    const qcode = SPECIAL_KEYS[e.key];
+    if (qcode && pressedKeys.has(qcode)) {
+      qmpKey(qcode, false);
+      pressedKeys.delete(qcode);
+    }
   }
+}
+
+// D-Bus 键盘（V2.0）：全键位 Linux keycode
+async function dbusKey(code, down) {
+  try {
+    await invoke("capture_input_key", { code, down });
+  } catch (err) {
+    if (consoleActive) console.error("dbusKey fail:", code, err);
+  }
+}
+
+// D-Bus 文本（V2.0）
+async function dbusText(text) {
+  try {
+    await invoke("capture_input_text", { text });
+  } catch (err) {
+    if (consoleActive) console.error("dbusText fail:", text, err);
+  }
+}
+
+// V2.0 鼠标：绝对坐标 + 按钮（usb-tablet，IsAbsolute）
+let mouseDown = false;
+function setupMouseInput() {
+  const canvas = $("#vm-canvas");
+  if (!canvas || canvas.dataset.vcMouse) return;
+  canvas.dataset.vcMouse = "1";
+  canvas.addEventListener("mousemove", (e) => {
+    if (!consoleActive) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * canvas.width);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * canvas.height);
+    invoke("capture_mouse_move", { x, y }).catch(() => {});
+  });
+  const btnMap = { 0: 0, 1: 2, 2: 1 }; // 左=0 中=2 右=1
+  const buttonDown = (e) => {
+    if (!consoleActive || e.button === undefined) return;
+    invoke("capture_mouse_button", { button: btnMap[e.button] ?? 0, down: true }).catch(() => {});
+  };
+  const buttonUp = (e) => {
+    if (!consoleActive || e.button === undefined) return;
+    invoke("capture_mouse_button", { button: btnMap[e.button] ?? 0, down: false }).catch(() => {});
+  };
+  canvas.addEventListener("mousedown", buttonDown);
+  canvas.addEventListener("mouseup", buttonUp);
+  canvas.addEventListener("mouseleave", () => {
+    if (mouseDown) { mouseDown = false; invoke("capture_mouse_button", { button: 0, down: false }).catch(() => {}); }
+  });
 }
 
 /* ===== VM 画面帧（canvas） ===== */

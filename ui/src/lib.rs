@@ -173,6 +173,45 @@ fn capture_status(state: tauri::State<'_, CaptureState>) -> bool {
     state.is_on()
 }
 
+#[cfg(unix)]
+#[tauri::command]
+async fn capture_input_key(
+    state: tauri::State<'_, CaptureState>,
+    code: String,
+    down: bool,
+) -> Result<(), String> {
+    capture::input_key(&state, code, down).await
+}
+
+#[cfg(unix)]
+#[tauri::command]
+async fn capture_input_text(
+    state: tauri::State<'_, CaptureState>,
+    text: String,
+) -> Result<(), String> {
+    capture::input_text(&state, text).await
+}
+
+#[cfg(unix)]
+#[tauri::command]
+async fn capture_mouse_move(
+    state: tauri::State<'_, CaptureState>,
+    x: u32,
+    y: u32,
+) -> Result<(), String> {
+    capture::mouse_move(&state, x, y).await
+}
+
+#[cfg(unix)]
+#[tauri::command]
+async fn capture_mouse_button(
+    state: tauri::State<'_, CaptureState>,
+    button: u32,
+    down: bool,
+) -> Result<(), String> {
+    capture::mouse_button(&state, button, down).await
+}
+
 // ===== 配置 =====
 
 #[tauri::command]
@@ -531,6 +570,14 @@ pub fn run() {
             capture_stop,
             #[cfg(unix)]
             capture_status,
+            #[cfg(unix)]
+            capture_input_key,
+            #[cfg(unix)]
+            capture_input_text,
+            #[cfg(unix)]
+            capture_mouse_move,
+            #[cfg(unix)]
+            capture_mouse_button,
             get_config,
             set_theme,
             set_ui_scale,

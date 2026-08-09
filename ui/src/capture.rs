@@ -42,6 +42,97 @@ trait QemuConsole {
     fn register_listener(&self, listener: OwnedFd) -> zbus::Result<()>;
 }
 
+/// org.qemu.Display1.Keyboard 代理（V2.0 输入）
+#[proxy(interface = "org.qemu.Display1.Keyboard", default_service = "org.qemu")]
+trait QemuKeyboard {
+    fn press(&self, keycode: u32) -> zbus::Result<()>;
+    fn release(&self, keycode: u32) -> zbus::Result<()>;
+}
+
+/// org.qemu.Display1.Mouse 代理（V2.0 输入）
+#[proxy(interface = "org.qemu.Display1.Mouse", default_service = "org.qemu")]
+trait QemuMouse {
+    fn press(&self, button: u32) -> zbus::Result<()>;
+    fn release(&self, button: u32) -> zbus::Result<()>;
+    fn set_abs_position(&self, x: u32, y: u32) -> zbus::Result<()>;
+}
+
+/// 浏览器 KeyboardEvent.code（"KeyA"、"Digit1"、"Enter"…）→ Linux evdev keycode。
+/// 覆盖完整美式键盘。QEMU D-Bus Keyboard 接受该 keycode 值。
+pub fn code_to_keycode(code: &str) -> Option<u32> {
+    let code = code.trim();
+    let v = match code {
+        // 字母
+        "KeyA" => 30, "KeyB" => 48, "KeyC" => 46, "KeyD" => 32, "KeyE" => 18,
+        "KeyF" => 33, "KeyG" => 34, "KeyH" => 35, "KeyI" => 23, "KeyJ" => 36,
+        "KeyK" => 37, "KeyL" => 38, "KeyM" => 50, "KeyN" => 49, "KeyO" => 24,
+        "KeyP" => 25, "KeyQ" => 16, "KeyR" => 19, "KeyS" => 31, "KeyT" => 20,
+        "KeyU" => 22, "KeyV" => 47, "KeyW" => 17, "KeyX" => 45, "KeyY" => 21,
+        "KeyZ" => 44,
+        // 数字（主行）
+        "Digit0" => 11, "Digit1" => 2, "Digit2" => 3, "Digit3" => 4, "Digit4" => 5,
+        "Digit5" => 6, "Digit6" => 7, "Digit7" => 8, "Digit8" => 9, "Digit9" => 10,
+        // 功能键
+        "F1" => 59, "F2" => 60, "F3" => 61, "F4" => 62, "F5" => 63, "F6" => 64,
+        "F7" => 65, "F8" => 66, "F9" => 67, "F10" => 68, "F11" => 87, "F12" => 88,
+        // 控制键
+        "Enter" => 28, "NumpadEnter" => 96, "Escape" => 1, "Backspace" => 14,
+        "Tab" => 15, "Space" => 57, "CapsLock" => 58,
+        "ControlLeft" => 29, "ControlRight" => 97,
+        "ShiftLeft" => 42, "ShiftRight" => 54,
+        "AltLeft" => 56, "AltRight" => 100,
+        "MetaLeft" => 125, "MetaRight" => 126,
+        // 方向键
+        "ArrowUp" => 103, "ArrowDown" => 108, "ArrowLeft" => 105, "ArrowRight" => 106,
+        // 编辑键
+        "Insert" => 110, "Delete" => 111, "Home" => 102, "End" => 107,
+        "PageUp" => 104, "PageDown" => 109,
+        // 标点（主行）
+        "Minus" => 12, "Equal" => 13, "BracketLeft" => 26, "BracketRight" => 27,
+        "Backslash" => 43, "Semicolon" => 39, "Quote" => 40, "Backquote" => 41,
+        "Comma" => 51, "Period" => 52, "Slash" => 53,
+        // 小键盘
+        "Numpad0" => 82, "Numpad1" => 79, "Numpad2" => 80, "Numpad3" => 81,
+        "Numpad4" => 75, "Numpad5" => 76, "Numpad6" => 77, "Numpad7" => 71,
+        "Numpad8" => 72, "Numpad9" => 73,
+        "NumpadAdd" => 78, "NumpadSubtract" => 74, "NumpadMultiply" => 55,
+        "NumpadDivide" => 98, "NumpadDecimal" => 83,
+        // 其他
+        "PrintScreen" => 99, "ScrollLock" => 70, "Pause" => 119,
+        _ => return None,
+    };
+    Some(v)
+}
+
+/// Linux evdev keycode → 需要 Shift 的可见字符映射（用于 capture_text）。
+/// 仅覆盖美式布局可见 ASCII。
+pub fn char_to_shift_keycode(c: char) -> Option<(u32, bool)> {
+    let (kc, shift) = match c {
+        'a'..='z' => (code_to_keycode(&format!("Key{}", c.to_ascii_uppercase()))?, false),
+        'A'..='Z' => (code_to_keycode(&format!("Key{}", c))?, true),
+        '0' => (11, false), '1' => (2, false), '2' => (3, false), '3' => (4, false),
+        '4' => (5, false), '5' => (6, false), '6' => (7, false), '7' => (8, false),
+        '8' => (9, false), '9' => (10, false),
+        '!' => (2, true), '@' => (3, true), '#' => (4, true), '$' => (5, true),
+        '%' => (6, true), '^' => (7, true), '&' => (8, true), '*' => (9, true),
+        '(' => (10, true), ')' => (11, true),
+        ' ' => (57, false),
+        '-' => (12, false), '_' => (12, true),
+        '=' => (13, false), '+' => (13, true),
+        '[' => (26, false), ']' => (27, false), '{' => (26, true), '}' => (27, true),
+        '\\' => (43, false), '|' => (43, true),
+        ';' => (39, false), ':' => (39, true),
+        '\'' => (40, false), '"' => (40, true),
+        '`' => (41, false), '~' => (41, true),
+        ',' => (51, false), '<' => (51, true),
+        '.' => (52, false), '>' => (52, true),
+        '/' => (53, false), '?' => (53, true),
+        '\t' => (15, false), '\n' => (28, false),
+        _ => return None,
+    };
+    Some((kc, shift))
+}
+
 /// Listener 接口实现：接收画面事件并更新帧缓冲（推送由采集循环周期执行）。
 struct ScanoutListener {
     frame: Arc<StdMutex<Option<FrameBuf>>>,
@@ -248,6 +339,10 @@ pub struct CaptureState {
     pub task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     frame: Arc<StdMutex<Option<FrameBuf>>>,
     dirty: Arc<StdMutex<DirtyState>>,
+    /// 主 D-Bus 连接（V2.0 输入：Keyboard/Mouse 接口）
+    input_bus: Arc<StdMutex<Option<zbus::Connection>>>,
+    /// 当前 Console 路径（如 /org/qemu/Display1/Console_0）
+    console_path: Arc<StdMutex<Option<String>>>,
 }
 
 impl Default for CaptureState {
@@ -257,6 +352,8 @@ impl Default for CaptureState {
             task: Arc::new(Mutex::new(None)),
             frame: Arc::new(StdMutex::new(None)),
             dirty: Arc::new(StdMutex::new(DirtyState::None)),
+            input_bus: Arc::new(StdMutex::new(None)),
+            console_path: Arc::new(StdMutex::new(None)),
         }
     }
 }
@@ -349,6 +446,9 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
         .build()
         .await
         .map_err(|e| e.to_string())?;
+    // 保存输入用连接与路径（V2.0 输入：Keyboard/Mouse）
+    *state.input_bus.lock().unwrap() = Some(bus.clone());
+    *state.console_path.lock().unwrap() = Some(console_path.clone());
 
     // socketpair：一端交 QEMU，一端本地 p2p
     let mut pair = [0; 2];
@@ -424,4 +524,93 @@ pub async fn stop(state: &CaptureState) {
         t.abort();
     }
     *state.frame.lock().unwrap() = None;
+    *state.input_bus.lock().unwrap() = None;
+    *state.console_path.lock().unwrap() = None;
+}
+
+// ===== V2.0 输入（D-Bus Keyboard / Mouse 接口） =====
+
+/// 键盘事件：code 为浏览器 KeyboardEvent.code，down 为按下/抬起。
+pub async fn input_key(state: &CaptureState, code: String, down: bool) -> Result<(), String> {
+    let kc = code_to_keycode(&code)
+        .ok_or_else(|| format!("不支持的按键: {code}"))?;
+    let bus = state.input_bus.lock().unwrap().clone()
+        .ok_or("未连接 VM（先启动采集）")?;
+    let path = state.console_path.lock().unwrap().clone()
+        .ok_or("未连接 VM")?;
+    let kb = QemuKeyboardProxy::builder(&bus)
+        .path(path.as_str())
+        .map_err(|e| e.to_string())?
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    if down {
+        kb.press(kc).await.map_err(|e| e.to_string())?;
+    } else {
+        kb.release(kc).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 文本输入：逐字符发送（含 Shift 修饰）。
+pub async fn input_text(state: &CaptureState, text: String) -> Result<(), String> {
+    let bus = state.input_bus.lock().unwrap().clone()
+        .ok_or("未连接 VM（先启动采集）")?;
+    let path = state.console_path.lock().unwrap().clone()
+        .ok_or("未连接 VM")?;
+    let kb = QemuKeyboardProxy::builder(&bus)
+        .path(path.as_str())
+        .map_err(|e| e.to_string())?
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    for c in text.chars() {
+        let (kc, shift) = char_to_shift_keycode(c)
+            .ok_or_else(|| format!("无法发送字符: {c}"))?;
+        if shift {
+            kb.press(42).await.map_err(|e| e.to_string())?; // ShiftLeft
+        }
+        kb.press(kc).await.map_err(|e| e.to_string())?;
+        kb.release(kc).await.map_err(|e| e.to_string())?;
+        if shift {
+            kb.release(42).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// 鼠标绝对移动：x,y 为画面内坐标（0..宽高）。
+pub async fn mouse_move(state: &CaptureState, x: u32, y: u32) -> Result<(), String> {
+    let bus = state.input_bus.lock().unwrap().clone()
+        .ok_or("未连接 VM（先启动采集）")?;
+    let path = state.console_path.lock().unwrap().clone()
+        .ok_or("未连接 VM")?;
+    let mouse = QemuMouseProxy::builder(&bus)
+        .path(path.as_str())
+        .map_err(|e| e.to_string())?
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    mouse.set_abs_position(x, y).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 鼠标按键：button 0=左 1=中 2=右。
+pub async fn mouse_button(state: &CaptureState, button: u32, down: bool) -> Result<(), String> {
+    let bus = state.input_bus.lock().unwrap().clone()
+        .ok_or("未连接 VM（先启动采集）")?;
+    let path = state.console_path.lock().unwrap().clone()
+        .ok_or("未连接 VM")?;
+    let mouse = QemuMouseProxy::builder(&bus)
+        .path(path.as_str())
+        .map_err(|e| e.to_string())?
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    if down {
+        mouse.press(button).await.map_err(|e| e.to_string())?;
+    } else {
+        mouse.release(button).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
