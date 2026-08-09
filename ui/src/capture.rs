@@ -42,9 +42,8 @@ trait QemuConsole {
     fn register_listener(&self, listener: OwnedFd) -> zbus::Result<()>;
 }
 
-/// Listener 接口实现：接收画面事件并推帧。
+/// Listener 接口实现：接收画面事件并更新帧缓冲（推送由采集循环周期执行）。
 struct ScanoutListener {
-    app: AppHandle,
     frame: Arc<StdMutex<Option<FrameBuf>>>,
     /// 自上次推送后是否有更新（合并高帧率局部更新）
     dirty: Arc<AtomicBool>,
@@ -60,23 +59,8 @@ struct FrameBuf {
 }
 
 impl ScanoutListener {
-    fn new(app: AppHandle, frame: Arc<StdMutex<Option<FrameBuf>>>, dirty: Arc<AtomicBool>) -> Self {
-        Self { app, frame, dirty }
-    }
-
-    /// 推送当前帧到前端（若 dirty）
-    fn flush(&self) {
-        if !self.dirty.swap(false, Ordering::Relaxed) {
-            return;
-        }
-        let guard = self.frame.lock().unwrap();
-        if let Some(f) = guard.as_ref() {
-            let b64 = B64.encode(&f.rgb);
-            let _ = self.app.emit(
-                "vm-frame",
-                json!({ "width": f.width, "height": f.height, "data": b64 }),
-            );
-        }
+    fn new(frame: Arc<StdMutex<Option<FrameBuf>>>, dirty: Arc<AtomicBool>) -> Self {
+        Self { frame, dirty }
     }
 }
 
@@ -143,7 +127,6 @@ impl ScanoutListener {
             rgb,
         });
         self.dirty.store(true, Ordering::Relaxed);
-        self.flush();
         Ok(())
     }
 
@@ -165,7 +148,6 @@ impl ScanoutListener {
             self.dirty.store(true, Ordering::Relaxed);
         }
         drop(guard);
-        self.flush();
         Ok(())
     }
 
@@ -205,7 +187,6 @@ impl ScanoutListener {
         eprintln!("[capture] Disable");
         *self.frame.lock().unwrap() = None;
         self.dirty.store(true, Ordering::Relaxed);
-        self.flush();
         Ok(())
     }
 
@@ -253,6 +234,21 @@ impl Default for CaptureState {
 impl CaptureState {
     pub fn is_on(&self) -> bool {
         self.on.load(Ordering::Relaxed)
+    }
+}
+
+/// 若帧有更新则推送到前端（合并高频局部更新，供采集循环周期调用）
+fn push_frame(app: &AppHandle, frame: &StdMutex<Option<FrameBuf>>, dirty: &AtomicBool) {
+    if !dirty.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let guard = frame.lock().unwrap();
+    if let Some(f) = guard.as_ref() {
+        let b64 = B64.encode(&f.rgb);
+        let _ = app.emit(
+            "vm-frame",
+            json!({ "width": f.width, "height": f.height, "data": b64 }),
+        );
     }
 }
 
@@ -304,14 +300,16 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
         .register_listener(qemu_fd_owned)
         .await
         .map_err(|e| format!("RegisterListener 失败: {e}"))?;
+    eprintln!("[capture] RegisterListener OK");
 
     let lconn = zbus::connection::Builder::unix_stream(our_stream)
         .p2p()
         .build()
         .await
         .map_err(|e| e.to_string())?;
+    eprintln!("[capture] p2p connection OK, unique={:?}", lconn.unique_name());
 
-    let listener = ScanoutListener::new(app.clone(), state.frame.clone(), state.dirty.clone());
+    let listener = ScanoutListener::new(state.frame.clone(), state.dirty.clone());
     lconn.object_server()
         .at("/org/qemu/Display1/Listener", listener)
         .await
@@ -319,16 +317,29 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
 
     state.on.store(true, Ordering::Relaxed);
     let on_flag = state.on.clone();
+    let task_app = app.clone();
+    let task_frame = state.frame.clone();
+    let task_dirty = state.dirty.clone();
     let task = tokio::spawn(async move {
-        // 保持连接存活（zbus 内部 executor 会驱动消息处理）；周期 tick 保活
+        use futures_util::StreamExt;
+        // 持续 poll zbus 消息（驱动 p2p 连接把方法调用派发到 Listener 接口）
+        let mut msgs = zbus::MessageStream::from(&lconn);
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(33));
         loop {
             if !on_flag.load(Ordering::Relaxed) {
                 break;
             }
-            tick.tick().await;
+            tokio::select! {
+                // 收到消息即已派发（zbus 内部路由），无需额外处理
+                _ = msgs.next() => {}
+                _ = tick.tick() => {
+                    // 周期合并推送帧（dirty 未置位时零开销）
+                    if task_dirty.load(Ordering::Relaxed) {
+                        push_frame(&task_app, &task_frame, &task_dirty);
+                    }
+                }
+            }
         }
-        let _ = lconn;
     });
     *state.task.lock().await = Some(task);
 

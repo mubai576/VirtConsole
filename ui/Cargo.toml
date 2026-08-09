@@ -22,6 +22,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 portable-pty = "0.8"
 zbus = { version = "5", features = ["tokio", "p2p"] }
 libc = "0.2"
+futures-util = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 # dbus-display 采集仅 Linux 目标使用（zbus 已在通用依赖，这里仅为文档化）
