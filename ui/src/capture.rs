@@ -312,6 +312,7 @@ fn push_frame(app: &AppHandle, frame: &StdMutex<Option<FrameBuf>>, dirty: &StdMu
 /// 启动 dbus-display 采集。
 /// bus_addr：None 用 session bus，Some 用自定义地址（QEMU -display dbus,addr= 同款）。
 pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String>) -> Result<String, String> {
+    eprintln!("[capture] capture_start 被调用（bus_addr={bus_addr:?}）");
     stop(state).await;
 
     let bus = match &bus_addr {
@@ -322,10 +323,22 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
             .map_err(|e| e.to_string())?,
         None => Connection::session().await.map_err(|e| e.to_string())?,
     };
+    eprintln!("[capture] 已连接 D-Bus");
 
     // 发现 VM + Console
     let vm = QemuVmProxy::new(&bus).await.map_err(|e| format!("D-Bus VM 对象不可达（VM 是否以 -display dbus 启动？）: {e}"))?;
-    let console_ids = vm.console_ids().await.map_err(|e| e.to_string())?;
+    eprintln!("[capture] VM 代理已建立");
+    let console_ids = match vm.console_ids().await {
+        Ok(ids) => {
+            eprintln!("[capture] ConsoleIDs={ids:?}");
+            ids
+        }
+        Err(e) => {
+            let msg = format!("读取 ConsoleIDs 失败: {e}");
+            eprintln!("[capture] {msg}");
+            return Err(msg);
+        }
+    };
     if console_ids.is_empty() {
         return Err("无可用 Console".into());
     }

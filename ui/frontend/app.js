@@ -222,7 +222,13 @@ function boot() {
       return;
     }
     invoke("boot_vmid").then((vmid) => {
-      if (vmid) enterConsole(vmid);
+      if (vmid) {
+        enterConsole(vmid);
+        // V2.0：尝试自动启动 dbus-display 采集（画面进 Canvas）
+        invoke("capture_start", { busAddr: null })
+          .then((msg) => console.error("[AUTOCAPTURE] " + msg))
+          .catch((e) => console.error("[AUTOCAPTURE] failed: " + e));
+      }
     });
   });
 }
