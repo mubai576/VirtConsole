@@ -43,6 +43,10 @@ export default function Vm({ consoleRef }) {
 
   const live = useRef({});
   live.current = { entities, idx, entity, sub, row, cidx, detail, snapshots, termActive };
+  // hasFocus 在下方才算出（依赖 FocusProvider），但 3s 轮询回调要读它 ——
+  // 用独立 ref 桥过去。少了这一步，离开 Tab 后的下一次轮询会把 .focused
+  // 重新贴回监控卡（onBlur 清过一次也没用），随机触发多高亮不变量失败。
+  const focusRef = useRef(false);
 
   const subNav = entity?.kind === "host" ? SUB_HOST : SUB_VM;
 
@@ -155,9 +159,12 @@ export default function Vm({ consoleRef }) {
           monRef.current?.setMetric(i);
           syncMonFocus(i);
         },
-        (cards) => {                   // 卡片异步就绪 → 同步焦点列表
+        (cards) => {                   // 卡片异步就绪（每轮轮询都会调）→ 同步焦点列表
           monCards.current = cards;
-          if (live.current.row === "content") syncMonFocus(live.current.cidx);
+          // 必须同时看 focusRef：本视图已让出高亮时不能再贴 .focused
+          if (focusRef.current && live.current.row === "content") {
+            syncMonFocus(live.current.cidx);
+          }
         }
       );
       return;
@@ -180,11 +187,8 @@ export default function Vm({ consoleRef }) {
     monCards.current.forEach((el) => el.classList.remove("focused"));
   }
 
-  useEffect(() => {
-    if (sub !== 1) return;
-    if (row === "content") syncMonFocus(cidx);
-    else clearMonFocus();
-  }, [row, cidx, sub]);
+  // 监控高亮的同步 effect 在 useViewKeys 之后（它要 hasFocus 进依赖数组，
+  // 而 hasFocus 是 useViewKeys 的返回值 —— 提到这里会撞 const 的 TDZ）。
 
   /** 终端的 DOM 焦点与退出钩子完全由 termActive 派生。
    *  不能在各处命令式地 focus/blur：退出一次后钩子被清掉，再进入若不重新注册，
@@ -221,13 +225,9 @@ export default function Vm({ consoleRef }) {
       return;
     }
     if (op === "dbus") {
-      try {
-        await invoke("capture_start", { busAddr: null });
-        await consoleRef.current?.enter(vmid);
-        toast("dbus 画面采集已启动");
-      } catch (err) {
-        toast("dbus 采集启动失败: " + err + "（VM 需以 -display dbus 启动）");
-      }
+      // 采集与进层的顺序由 enter 内部保证（方案 §5.1 第 1 条），
+      // 采集失败也照样进层：键盘会走 QMP 回退，只是没有像素流。
+      await consoleRef.current?.enter(vmid, { capture: true });
       return;
     }
     if (op === "enable-dbus" || op === "disable-dbus") {
@@ -328,9 +328,10 @@ export default function Vm({ consoleRef }) {
       if (!live.current.entities.length) refresh();
     },
     onBlur: () => {
-      // 只释放高亮与键盘，不拆监控/终端：本 Tab 被藏起来后再回来，
+      // 只释放键盘，不拆监控/终端：本 Tab 被藏起来后再回来，
       // entity/sub 未变则挂载 effect 不会重跑，拆了就再也不回来了。
-      clearMonFocus();
+      // 监控高亮不在这里清 —— 由下面那个 effect 按 hasFocus 派生，
+      // 否则 3s 轮询会在清完之后把 .focused 重新贴回来。
       if (live.current.termActive) setTermActive(false);
     },
     onKey: (e) => {
@@ -403,6 +404,16 @@ export default function Vm({ consoleRef }) {
       return false;
     },
   });
+
+  // 监控高亮完全派生自 (hasFocus, row, cidx, sub)，与 React 侧高亮同源。
+  // hasFocus 进依赖数组是关键：让出高亮时这里会重跑并清干净，不靠 onBlur ——
+  // onBlur 只在切走那一刻跑一次，之后的轮询照样会把 .focused 贴回来。
+  useEffect(() => {
+    focusRef.current = hasFocus;
+    if (sub !== 1) return;
+    if (hasFocus && row === "content") syncMonFocus(cidx);
+    else clearMonFocus();
+  }, [hasFocus, row, cidx, sub]);
 
   /* ===== 渲染 ===== */
   const navFocused = hasFocus && row === "nav";

@@ -129,11 +129,9 @@ export default function App() {
         }
         invoke("boot_vmid").then((vmid) => {
           if (!vmid) return;
-          consoleRef.current?.enter(vmid);
-          // V2.0：开机直连时自动起 dbus 采集（画面进 canvas）
-          invoke("capture_start", { busAddr: null }).catch((e) =>
-            console.error("[AUTOCAPTURE] failed: " + e)
-          );
+          // V2.0 自动采集 + §5.1：capture 先起再进沉浸层，由 enter 内部保证顺序。
+          // 失败也不再只写 console.error（kiosk 无 devtools），enter 会 toast。
+          consoleRef.current?.enter(vmid, { capture: true });
         });
       })
       .catch(() => {});

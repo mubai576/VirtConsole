@@ -3,7 +3,9 @@
 //  - 真机且有 dbus-display VM 时：capture_start 成功
 //  - 无 dbus VM 时：返回明确错误（不崩溃），capture_status 为 false
 import { invoke, drawFrame } from "../../shared.js";
-import { step, assert } from "../framework.js";
+import {
+  step, assert, key, keyup, ctrlAltQ, click, flush, qa, goHome, consoleVisible,
+} from "../framework.js";
 
 async function captureAvailable() {
   try {
@@ -133,6 +135,91 @@ export const suiteL = {
         assert(typeof e === "string" && e.length > 0, `启用命令应返回错误，实际: ${e}`);
       });
       assert(true, "启用/禁用 dbus 命令已注册");
+    });
+  },
+};
+
+// 套件 L7：输入转发链路（方案 §5.1 的回归网）。
+//
+// 从前这条链断在前端：`if (e.code)` 恒真让"回退 QMP"成了死代码，失败又只写
+// console.error（kiosk 无 devtools），于是 spike 直连有效、前端无效，
+// 而 11 套件里没有一条能发现——L7 就是补这个洞。
+//
+// 不依赖 dbus VM：只验"按键有没有走到 IPC、走的是哪条通道、错误有没有留痕"。
+// 未连 VM 时后端返回错误串是预期结果，断言接受 ok 或带 err，不接受静默丢弃。
+export const suiteL7 = {
+  id: "input",
+  label: "输入转发链路",
+  async run() {
+    // 进沉浸层：首页第一个快捷块（与套件 I 同一入口）
+    async function enterConsole() {
+      await goHome();
+      window.__vcInputLogClear();
+      click(qa("#hm-quick .quick")[0]);
+      await flush(250);
+      assert(consoleVisible(), "未进入沉浸层");
+    }
+    const leave = async () => { ctrlAltQ(); await flush(150); };
+
+    await step("L7_input_cmds_registered_both_platforms", async () => {
+      // 命令必须两个平台都注册：否则前端拿到的是「命令不存在」而不是输入层的
+      // 真实错误，这正是 §5.1 第 3 条「错误不可见」的来源。
+      const ready = await invoke("capture_input_ready");
+      assert(typeof ready === "boolean", `capture_input_ready 应返回 bool，实际 ${ready}`);
+    });
+
+    await step("L7_key_reaches_ipc", async () => {
+      await enterConsole();
+      key("ArrowUp", { code: "ArrowUp" });
+      keyup("ArrowUp", { code: "ArrowUp" });
+      await flush(200);
+
+      const log = window.__vcInputLog();
+      const keys = log.filter((e) => e.kind === "capture_input_key");
+      assert(keys.length >= 2, `按键未走到 IPC（日志 ${JSON.stringify(log)}）`);
+      assert(keys.some((e) => e.code === "ArrowUp" && e.down === true), "缺少 ArrowUp 按下");
+      assert(keys.some((e) => e.code === "ArrowUp" && e.down === false), "缺少 ArrowUp 抬起");
+      for (const e of keys) {
+        assert(e.ok === true || (typeof e.err === "string" && e.err.length > 0),
+          `失败项必须留下错误信息，不能静默丢弃: ${JSON.stringify(e)}`);
+      }
+      await leave();
+    });
+
+    await step("L7_printable_goes_to_text_channel", async () => {
+      await enterConsole();
+      key("a", { code: "KeyA" });
+      await flush(200);
+      const log = window.__vcInputLog();
+      assert(log.some((e) => e.kind === "capture_input_text" && e.text === "a"),
+        `可打印字符应走文本通道（日志 ${JSON.stringify(log)}）`);
+      assert(!log.some((e) => e.kind === "capture_input_key" && e.code === "KeyA"),
+        "可打印字符不应同时走按键通道（会重复输入）");
+      await leave();
+    });
+
+    await step("L7_exit_releases_stuck_keys", async () => {
+      await enterConsole();
+      // 只按下不抬起就退出：必须补发抬起，否则 guest 侧修饰键一直按住
+      key("Control", { code: "ControlLeft" });
+      await flush(150);
+      await leave();
+      await flush(200);
+      const ups = window.__vcInputLog().filter(
+        (e) => e.kind === "capture_input_key" && e.code === "ControlLeft" && e.down === false
+      );
+      assert(ups.length >= 1, `退出沉浸层未补发卡住按键的抬起（日志 ${JSON.stringify(window.__vcInputLog())}）`);
+    });
+
+    await step("L7_global_exit_key_not_forwarded", async () => {
+      await enterConsole();
+      ctrlAltQ();
+      await flush(200);
+      const log = window.__vcInputLog();
+      assert(!log.some((e) => e.code === "KeyQ" || e.text === "q"),
+        `Ctrl+Alt+Q 不应转发给 VM（日志 ${JSON.stringify(log)}）`);
+      assert(!consoleVisible(), "Ctrl+Alt+Q 未退出沉浸层");
+      await goHome();
     });
   },
 };

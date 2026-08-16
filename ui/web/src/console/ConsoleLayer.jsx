@@ -21,29 +21,56 @@ const ConsoleLayer = forwardRef(function ConsoleLayer(_props, ref) {
   const fitRef = useRef("contain");
 
   useFrameStream(canvasRef);
-  const { keyDown, keyUp } = useInputForward(canvasRef, activeRef);
+  const { keyDown, keyUp, resetSession } = useInputForward(canvasRef, activeRef);
 
   useImperativeHandle(ref, () => ({
     isActive: () => activeRef.current,
 
-    async enter(vmid) {
+    /**
+     * 进入沉浸层。`capture` 为 true 时先起 dbus 采集再显示画面。
+     *
+     * 顺序是方案 §5.1 第 1 条的修复点：旧实现先 enterConsole 再 capture_start，
+     * 而 input_bus 只在 capture_start 成功后写入，这中间的按键会被判「未连接
+     * VM」丢掉。现在采集先起，且 QMP 回退在后端兜底，两层都不丢键。
+     */
+    async enter(vmid, { capture = false } = {}) {
+      resetSession();
+      setCrumb(`VM ${vmid} 控制台`);
+      setHint("Ctrl+Alt+Q 返回 · 按键直接输入到虚拟机");
+      toast(`正在连接 VM ${vmid} ...`);
+
+      let captureErr = null;
+      if (capture) {
+        try {
+          await invoke("capture_start", { busAddr: null });
+        } catch (e) {
+          captureErr = e;   // 不阻断：QMP 回退仍可用，画面走不了而已
+        }
+      }
+
       activeRef.current = true;
       setVisible(true);
       // kiosk 下需显式取键盘焦点
       window.focus();
       document.body.setAttribute("tabindex", "0");
       document.body.focus();
-      setCrumb(`VM ${vmid} 控制台`);
-      setHint("Ctrl+Alt+Q 返回 · 按键直接输入到虚拟机");
-      toast(`正在连接 VM ${vmid} ...`);
+
       try {
         toast(await invoke("vm_connect", { vmid }));
       } catch (e) {
         toast("连接失败: " + e);
       }
+      if (captureErr) {
+        toast("画面采集未启动: " + captureErr + "（键盘已回退 QMP）");
+      } else if (capture) {
+        // 采集起来了但 D-Bus 输入没就绪，说明键盘在走回退，得让用户知道
+        const ready = await invoke("capture_input_ready").catch(() => false);
+        if (!ready) toast("D-Bus 输入未就绪，键盘已回退 QMP");
+      }
     },
 
     exit() {
+      resetSession();          // 补齐卡住的按键抬起，再断开
       activeRef.current = false;
       setVisible(false);
       invoke("vm_disconnect").catch(() => {});

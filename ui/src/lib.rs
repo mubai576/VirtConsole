@@ -10,6 +10,7 @@ mod browser;
 #[cfg(unix)]
 mod capture;
 mod config;
+mod input;
 mod pve;
 mod qmp;
 mod terminal;
@@ -173,23 +174,62 @@ fn capture_status(state: tauri::State<'_, CaptureState>) -> bool {
     state.is_on()
 }
 
+// 键盘/文本走 input::（D-Bus 优先，未就绪回退 QMP，方案 §5.1）。
+// 命令名保持 capture_* 不变：前端与 11 套件都按这个名字调。
+// 两个平台都注册：前端不该知道自己在哪个平台，非 unix 只是恒走 QMP。
+// 从前非 unix 下这两个命令不存在，前端拿到的是「命令不存在」而非输入层的
+// 真实错误，§5.1 第 3 条「错误不可见」就是这么来的。
 #[cfg(unix)]
 #[tauri::command]
 async fn capture_input_key(
     state: tauri::State<'_, CaptureState>,
+    qmp_state: tauri::State<'_, QmpState>,
     code: String,
     down: bool,
 ) -> Result<(), String> {
-    capture::input_key(&state, code, down).await
+    input::key(&state, &qmp_state, code, down).await
+}
+
+#[cfg(not(unix))]
+#[tauri::command]
+async fn capture_input_key(
+    qmp_state: tauri::State<'_, QmpState>,
+    code: String,
+    down: bool,
+) -> Result<(), String> {
+    input::key(&qmp_state, code, down).await
 }
 
 #[cfg(unix)]
 #[tauri::command]
 async fn capture_input_text(
     state: tauri::State<'_, CaptureState>,
+    qmp_state: tauri::State<'_, QmpState>,
     text: String,
 ) -> Result<(), String> {
-    capture::input_text(&state, text).await
+    input::text(&state, &qmp_state, text).await
+}
+
+#[cfg(not(unix))]
+#[tauri::command]
+async fn capture_input_text(
+    qmp_state: tauri::State<'_, QmpState>,
+    text: String,
+) -> Result<(), String> {
+    input::text(&qmp_state, text).await
+}
+
+/// D-Bus 输入是否就绪（前端进沉浸层前用它判断该等还是直接回退）
+#[cfg(unix)]
+#[tauri::command]
+fn capture_input_ready(state: tauri::State<'_, CaptureState>) -> bool {
+    input::dbus_ready(&state)
+}
+
+#[cfg(not(unix))]
+#[tauri::command]
+fn capture_input_ready() -> bool {
+    false
 }
 
 #[cfg(unix)]
@@ -570,9 +610,8 @@ pub fn run() {
             capture_stop,
             #[cfg(unix)]
             capture_status,
-            #[cfg(unix)]
+            capture_input_ready,
             capture_input_key,
-            #[cfg(unix)]
             capture_input_text,
             #[cfg(unix)]
             capture_mouse_move,

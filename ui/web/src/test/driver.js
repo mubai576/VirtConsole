@@ -16,9 +16,9 @@ import { suiteH } from "./suites/h-modal.js";
 import { suiteI } from "./suites/i-immersive.js";
 import { suiteJ } from "./suites/j-invariants.js";
 import { suiteK } from "./suites/k-empty.js";
-import { suiteL } from "./suites/l-dbus.js";
+import { suiteL, suiteL7 } from "./suites/l-dbus.js";
 
-const SUITES = [suiteA, suiteB, suiteC, suiteD, suiteE, suiteF, suiteG, suiteH, suiteI, suiteJ, suiteK, suiteL];
+const SUITES = [suiteA, suiteB, suiteC, suiteD, suiteE, suiteF, suiteG, suiteH, suiteI, suiteJ, suiteK, suiteL, suiteL7];
 
 export async function run() {
   let origTheme = "dark";

@@ -362,6 +362,12 @@ impl CaptureState {
     pub fn is_on(&self) -> bool {
         self.on.load(Ordering::Relaxed)
     }
+
+    /// D-Bus 输入是否可用：连接与 Console 路径都已就绪。
+    /// `input::pick` 据此选 sink —— 为 false 时走 QMP 回退而非报错（方案 §5.1）。
+    pub fn input_ready(&self) -> bool {
+        self.input_bus.lock().unwrap().is_some() && self.console_path.lock().unwrap().is_some()
+    }
 }
 
 /// 从帧缓冲中截取局部区域的 RGB 数据（供差分推送）

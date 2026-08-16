@@ -36,8 +36,9 @@ function dispatchKey(k, type, opts) {
 export function key(k, opts = {}) {
   dispatchKey(k, "keydown", opts);
 }
-export function keyup(k) {
-  dispatchKey(k, "keyup", {});
+// opts 与 key() 同源：套件 L7 要发 { code } 才能验证 KeyboardEvent.code 转发链
+export function keyup(k, opts = {}) {
+  dispatchKey(k, "keyup", opts);
 }
 export function ctrlAltQ() {
   key("q", { ctrlKey: true, altKey: true });
