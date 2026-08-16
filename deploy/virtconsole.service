@@ -1,7 +1,7 @@
 [Unit]
 Description=VirtConsole HDMI Terminal Application
-Requires=virtconsole-weston.service
-After=virtconsole-weston.service
+Requires=virtconsole-weston.service virtconsole-dbus.service
+After=virtconsole-weston.service virtconsole-dbus.service
 
 [Service]
 # 临时以 root 运行：QMP socket（/var/run/qemu-server/<vmid>.qmp）仅 root 可访问；
@@ -12,7 +12,7 @@ Environment=XDG_RUNTIME_DIR=/run/virtconsole
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/virtconsole/dbus
 Environment=VIRTCONSOLE_AUTOCONNECT_VMID=9000
 Environment=GDK_BACKEND=wayland
-ExecStartPre=/bin/sh -c '[ -S /run/virtconsole/dbus ] || (XDG_RUNTIME_DIR=/run dbus-daemon --session --fork --address=unix:path=/run/virtconsole/dbus && sleep 1)'
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /run/virtconsole/dbus ] && exit 0; sleep 1; done; exit 1'
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /run/virtconsole/wayland-0 ] && exit 0; sleep 1; done; exit 1'
 ExecStart=/usr/local/bin/vc-ui
 Restart=on-failure

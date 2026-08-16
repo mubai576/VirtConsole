@@ -179,11 +179,56 @@ export const suiteL7 = {
       assert(keys.length >= 2, `按键未走到 IPC（日志 ${JSON.stringify(log)}）`);
       assert(keys.some((e) => e.code === "ArrowUp" && e.down === true), "缺少 ArrowUp 按下");
       assert(keys.some((e) => e.code === "ArrowUp" && e.down === false), "缺少 ArrowUp 抬起");
+      // §7 记录（2026-08-17）：原断言只要求「ok 或留下 err」，于是真机上
+      // 后端报错也算通过——L7 曾 6/6 全绿而 guest 一个键都没收到。收紧为：
+      // capture_input_ready() 为真（D-Bus 已就绪）时必须 ok===true；未就绪
+      // （Windows 开发机、未连 VM）仍只要求留痕，保持本套件跨平台可跑。
+      const readyNow = await invoke("capture_input_ready").catch(() => false);
       for (const e of keys) {
-        assert(e.ok === true || (typeof e.err === "string" && e.err.length > 0),
-          `失败项必须留下错误信息，不能静默丢弃: ${JSON.stringify(e)}`);
+        if (readyNow === true) {
+          assert(e.ok === true,
+            `D-Bus 已就绪，按键必须真的送达，不能只留错误: ${JSON.stringify(e)}`);
+        } else {
+          assert(e.ok === true || (typeof e.err === "string" && e.err.length > 0),
+            `失败项必须留下错误信息，不能静默丢弃: ${JSON.stringify(e)}`);
+        }
       }
       await leave();
+    });
+
+    // §7 新增（2026-08-17）：上面那条不依赖 dbus VM，所以真机上也走不到 D-Bus
+    // 分支。这条主动开采集，只有 capture_input_ready() 真为 true 时才做强断言；
+    // Windows 上 capture_start 未注册（cfg(unix)），catch 后跳过，套件仍可跑。
+    // 探测提到 step 外面，把状态编进步骤名：framework.step 在 PASS 时把 detail
+    // 写成 ""，assert 文案会丢，只有 name 出现在 [TEST] 行。不编进名字就分不清
+    // 「真的送达」和「未就绪跳过」——那正是上一版误绿的形状。
+    let started = false;
+    try {
+      await invoke("capture_start", { busAddr: null });
+      started = true;
+    } catch { /* 非 unix 或未连 VM：按未就绪跳过 */ }
+    const dbusReady = await invoke("capture_input_ready").catch(() => false);
+    const capStatus = await invoke("capture_status").catch((e) => `err:${e}`);
+    await step(
+      `L7_dbus_key_delivered_when_capture_on[started=${started},status=${capStatus},ready=${dbusReady}]`,
+      async () => {
+      const ready = dbusReady;
+      if (ready !== true) {
+        assert(true, `D-Bus 未就绪（started=${started}），跳过强断言`);
+        if (started) await invoke("capture_stop").catch(() => {});
+        return;
+      }
+      await enterConsole();
+      key("ArrowUp", { code: "ArrowUp" });
+      keyup("ArrowUp", { code: "ArrowUp" });
+      await flush(300);
+      const keys = window.__vcInputLog().filter((e) => e.kind === "capture_input_key");
+      assert(keys.length >= 2, `按键未走到 IPC（日志 ${JSON.stringify(window.__vcInputLog())}）`);
+      for (const e of keys) {
+        assert(e.ok === true, `D-Bus 就绪但按键未送达: ${JSON.stringify(e)}`);
+      }
+      await leave();
+      await invoke("capture_stop").catch(() => {});
     });
 
     await step("L7_printable_goes_to_text_channel", async () => {

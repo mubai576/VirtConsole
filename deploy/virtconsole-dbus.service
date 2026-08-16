@@ -1,0 +1,23 @@
+[Unit]
+# QEMU dbus-display 与 vc-ui 采集共用的 session 总线，独立成单元。
+#
+# 为什么不留在 vc-ui 的 ExecStartPre 里 fork：那样 dbus-daemon 会落进
+# virtconsole.service 的 cgroup，`systemctl stop virtconsole` 杀 cgroup 时
+# 总线一起死、socket 被删掉；重启又在同一路径起一个「新」总线，而此前已经
+# 挂上来的 QEMU 仍连在那个死总线上 —— 新总线上再也看不到 org.qemu，
+# capture_start 必然失败（Connection::session 拿不到 VM 对象）。
+# 总线必须比 vc-ui 活得久，VM 才能跨 vc-ui 重启保持可采集。
+Description=VirtConsole shared D-Bus session bus (QEMU dbus-display <-> vc-ui)
+Before=virtconsole.service
+
+[Service]
+Type=simple
+# 不声明 RuntimeDirectory=virtconsole：那会让 systemd 在本单元停止时删掉整个
+# /run/virtconsole，而 weston 的 wayland-0 也在那里。只补建目录，不接管它。
+ExecStartPre=/bin/mkdir -p /run/virtconsole
+ExecStart=/usr/bin/dbus-daemon --session --nofork --address=unix:path=/run/virtconsole/dbus
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
