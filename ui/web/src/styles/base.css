@@ -1,0 +1,48 @@
+/* 全局基线：字体栈沿用 MiSans（小米字体，与 miuix 设计语言同源） */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 焦点指示统一由 .vc-focused 承担，避免系统焦点环与键盘高亮两套并存 */
+*:focus {
+  outline: none;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+  background: var(--background);
+  color: var(--on-background);
+  font-family: "MiSans", "MiSans VF", -apple-system, "PingFang SC",
+    "HarmonyOS Sans SC", "Segoe UI", system-ui, sans-serif;
+  font-size: var(--fs-main);
+  line-height: var(--lh-paragraph);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+}
+
+/* 减少动效偏好：关闭过渡（kiosk 环境亦可由此排查动效问题） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

@@ -17,6 +17,36 @@ SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RUNTIME_DEPS="weston wayland-protocols mesa-utils pciutils seatd"
 # vc-ui（Tauri）构建依赖；已在装有 Rust 的构建机上运行 cargo build --release -p vc-ui
 BUILD_DEPS="build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev"
+# 前端（Vite/React）构建依赖：Vite 7 要求 Node >= 20.19，Debian 12 自带 18 过旧
+NODE_MIN_MAJOR=20
+WEB_DIR_REL="ui/web"
+
+# 构建前端产物到 ui/dist（Tauri frontendDist 指向它）。
+# 不提交 dist 到仓库，故 cargo build 前必须先跑这一步。
+build_web() {
+  local web_dir="${SRC_DIR}/${WEB_DIR_REL}"
+  if [[ ! -f "${web_dir}/package.json" ]]; then
+    echo "[提示] 未找到 ${WEB_DIR_REL}/package.json，跳过前端构建"
+    return 0
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "[错误] 未找到 npm。Debian 12 自带 Node 18 过旧，请安装 Node >= ${NODE_MIN_MAJOR}："
+    echo "       curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs"
+    return 1
+  fi
+  local major
+  major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [[ "${major}" -lt "${NODE_MIN_MAJOR}" ]]; then
+    echo "[错误] Node 版本过低（当前 ${major}.x，需 >= ${NODE_MIN_MAJOR}）。升级方式同上。"
+    return 1
+  fi
+  echo "--- 构建前端（Node ${major}.x）---"
+  ( cd "${web_dir}" && npm ci && npm run build ) || {
+    echo "[错误] 前端构建失败"
+    return 1
+  }
+  echo "[完成] 前端产物已生成到 ui/dist"
+}
 
 need_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
@@ -47,6 +77,10 @@ cmd_install() {
   systemctl daemon-reload
 
   # 4. 安装应用（需已构建）
+  #    前端产物内嵌在二进制里（frontendDist=ui/dist），故此处只校验，不重建。
+  if [[ ! -d "${SRC_DIR}/ui/dist" ]]; then
+    echo "[提示] 未找到 ui/dist（前端未构建）。构建机请执行：$0 build"
+  fi
   if [[ -f "${SRC_DIR}/target/release/${APP_NAME}" ]]; then
     install -m 0755 "${SRC_DIR}/target/release/${APP_NAME}" "${APP_BIN}"
     echo "[完成] 已安装 ${APP_BIN}"
@@ -101,9 +135,18 @@ cmd_remove() {
   echo "已移除服务、二进制与配置。运行用户与系统包保留。"
 }
 
+# 完整构建：前端产物 + Rust 二进制。构建机上用它替代裸 cargo build。
+cmd_build() {
+  build_web || exit 1
+  echo "--- 构建 vc-ui（release）---"
+  ( cd "${SRC_DIR}" && cargo build --release -p vc-ui )
+}
+
 case "${1:-install}" in
   install) cmd_install ;;
+  build)   cmd_build ;;
+  web)     build_web ;;
   check)   cmd_check ;;
   remove)  cmd_remove ;;
-  *) echo "用法: $0 [install|check|remove]"; exit 1 ;;
+  *) echo "用法: $0 [install|build|web|check|remove]"; exit 1 ;;
 esac

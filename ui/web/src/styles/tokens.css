@@ -1,0 +1,161 @@
+/* ===== miuix 设计 token 移植 =====
+ * 数值取自 miuix 源码（compose-miuix-ui/miuix, miuix-ui/src/commonMain/.../theme/）：
+ *   Colors.kt / TextStyles.kt / basic/*Defaults
+ * 尺度按十英尺 UI 放大约 1.9×，基准 2K（详见 docs/V3.0-miuix重构方案.md §二）
+ */
+
+/* ---------- 缩放模型 ----------
+ * 观看距离不变，元素应占相同屏幕比例 → px 与视口宽度成正比。
+ * 0.625vw 使 2560 宽时根字号为 16px；1080p→12px、2K→16px、4K→24px，物理尺寸一致。
+ * --vc-user-scale 为用户偏好倍率（设置页写入）。
+ */
+:root {
+  font-size: calc(0.625vw * var(--vc-user-scale, 1));
+}
+
+/* 极端视口下兜底：过窄/过宽时限制根字号，避免不可用 */
+@media (max-width: 1280px) {
+  :root { font-size: calc(8px * var(--vc-user-scale, 1)); }
+}
+@media (min-width: 5120px) {
+  :root { font-size: calc(32px * var(--vc-user-scale, 1)); }
+}
+
+:root {
+  /* ---------- 排版（rem，2K 下 1rem = 16px） ---------- */
+  --fs-title1: 3.75rem;    /* miuix 32sp → 60px@2K */
+  --fs-title2: 2.75rem;    /* 24sp → 44px */
+  --fs-title3: 2.375rem;   /* 20sp → 38px */
+  --fs-title4: 2.125rem;   /* 18sp → 34px */
+  --fs-main: 2rem;         /* 17sp → 32px（正文基准） */
+  --fs-body1: 1.875rem;    /* 16sp → 30px */
+  --fs-body2: 1.625rem;    /* 14sp → 26px（摘要） */
+  --fs-footnote1: 1.5rem;  /* 13sp → 24px */
+  --fs-footnote2: 1.25rem; /* 11sp → 20px */
+  --lh-paragraph: 1.2;     /* miuix Paragraph lineHeight = 1.2em */
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-bold: 700;          /* miuix Subtitle / Title 用 Bold */
+
+  /* ---------- 尺寸 ---------- */
+  --row-h: 7rem;           /* BasicComponent 56dp → 112px@2K */
+  --radius-card: 1.75rem;  /* Card.CornerRadius 16dp → 28px */
+  --radius-btn: 1.75rem;   /* Button.CornerRadius 16dp */
+  --radius-field: 1.75rem;
+  --pad-page: 4rem;        /* 电视安全区 → 64px */
+  --gap-card: 2rem;        /* 卡片间距 → 32px */
+  --pad-row: 2rem;         /* BasicComponent padding 16dp → 32px */
+  --pad-btn-x: 2rem;       /* Button padding h16dp → 32px */
+  --pad-btn-y: 1.625rem;   /* Button padding v13dp → 26px */
+  --btn-min-h: 5rem;       /* Button.MinHeight 40dp → 80px */
+  --btn-min-w: 7.25rem;    /* Button.MinWidth 58dp → 116px */
+  --title-pad-x: 3.5rem;   /* SmallTitle.InsideMargin 28dp → 56px */
+  --title-pad-y: 1rem;     /* SmallTitle 8dp → 16px */
+
+  /* Switch：miuix 49×28，滑块 20，行程 4→25 —— 等比放大 1.9× */
+  --switch-w: 6.125rem;
+  --switch-h: 3.5rem;
+  --switch-knob: 2.5rem;
+  --switch-travel: 2.625rem;
+
+  /* ---------- 焦点态（miuix 无键盘焦点模型，本项目自定义） ---------- */
+  --focus-ring-w: 0.1875rem;   /* 3px@2K */
+  --focus-scale: 1.015;
+
+  /* ---------- 动效 ----------
+   * miuix 用弹簧物理参数（response/damping），CSS 以贝塞尔近似 */
+  --ease-miuix: cubic-bezier(0.32, 0.94, 0.6, 1);
+  --dur: 250ms;
+  --dur-fast: 150ms;
+}
+
+/* ---------- 暗色（默认）----------
+ * 注意 miuix 暗色 surface 是纯黑、background 是 #242424：
+ * 分组卡片(#242424) 浮在纯黑底(#000) 上，与常规明暗关系相反。
+ */
+:root,
+[data-theme="dark"] {
+  --primary: #277AF7;
+  --primary-variant: #0073DD;
+  --on-primary: #FFFFFF;
+  --on-primary-variant: #99C7F1;
+  --primary-container: #338FE4;
+  --disabled-primary: #253E64;
+  --disabled-on-primary: #677993;
+
+  --background: #000000;          /* miuix surface(纯黑) 作页面底 */
+  --on-background: rgba(255, 255, 255, 0.9);
+  --on-background-variant: #787E96;
+
+  --surface: #242424;             /* miuix surfaceVariant/Container 作卡片 */
+  --surface-container: #242424;
+  --surface-container-high: #242424;
+  --surface-container-highest: #2D2D2D;
+  --on-surface: #F2F2F2;
+  --on-surface-secondary: rgba(255, 255, 255, 0.8);
+  --on-surface-variant-summary: rgba(255, 255, 255, 0.6);
+  --disabled-on-surface: #6B6B6B;
+
+  --secondary: #505050;
+  --secondary-variant: #434343;
+  --on-secondary-variant: #D9D9D9;
+
+  --outline: #404040;
+  --divider: #393939;
+
+  --error: #F12522;
+  --on-error: #FFFFFF;
+  --error-container: #2E0603;
+  --on-error-container: #FFDAD6;
+
+  --ok: #37D058;
+  --warn: #FFB21D;
+
+  --window-dimming: rgba(0, 0, 0, 0.6);
+  --focus-ring: var(--primary);
+  --focus-bg: var(--surface-container-highest);
+}
+
+/* ---------- 亮色 ---------- */
+[data-theme="light"] {
+  --primary: #3482FF;
+  --primary-variant: #3482FF;
+  --on-primary: #FFFFFF;
+  --on-primary-variant: #AECDFF;
+  --primary-container: #5D9BFF;
+  --disabled-primary: #C2D9FF;
+  --disabled-on-primary: #F3F8FF;
+
+  --background: #F7F7F7;          /* miuix surface */
+  --on-background: #000000;
+  --on-background-variant: #8C93B0;
+
+  --surface: #FFFFFF;             /* miuix background(白) 作卡片 */
+  --surface-container: #FFFFFF;
+  --surface-container-high: #E8E8E8;
+  --surface-container-highest: #E8E8E8;
+  --on-surface: #000000;
+  --on-surface-secondary: rgba(0, 0, 0, 0.8);
+  --on-surface-variant-summary: rgba(0, 0, 0, 0.6);
+  --disabled-on-surface: #B2B2B2;
+
+  --secondary: #E6E6E6;
+  --secondary-variant: #F0F0F0;
+  --on-secondary-variant: #303030;
+
+  --outline: #D9D9D9;
+  --divider: #E0E0E0;
+
+  --error: #E94634;
+  --on-error: #FFFFFF;
+  --error-container: #FDF6F4;
+  --on-error-container: #410002;
+
+  --ok: #30A64A;
+  --warn: #E08600;
+
+  --window-dimming: rgba(0, 0, 0, 0.3);
+  --focus-ring: var(--primary);
+  --focus-bg: var(--surface-container-highest);
+}

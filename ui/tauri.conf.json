@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.virtconsole.app",
   "build": {
-    "frontendDist": "../ui/frontend"
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "withGlobalTauri": true,
