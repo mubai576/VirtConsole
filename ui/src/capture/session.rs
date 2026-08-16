@@ -22,6 +22,8 @@ use tokio::sync::Mutex;
 use zbus::zvariant::OwnedFd;
 use zbus::{proxy, Connection};
 
+use super::frame::{apply_update, push_frame, xrgb_to_rgb, DirtyState, FrameBuf};
+
 /// org.qemu.Display1.VM 代理
 #[proxy(interface = "org.qemu.Display1.VM", default_service = "org.qemu", default_path = "/org/qemu/Display1/VM")]
 trait QemuVm {
@@ -164,10 +166,12 @@ pub struct CaptureState {
     pub task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     frame: Arc<StdMutex<Option<FrameBuf>>>,
     dirty: Arc<StdMutex<DirtyState>>,
+    // 拆分前这两个字段与 input_key/input_text 同文件，私有即够；现在
+    // dbus_input 是兄弟模块，需 pub(super) 才能读到。范围仍限于 capture。
     /// 主 D-Bus 连接（V2.0 输入：Keyboard/Mouse 接口）
-    input_bus: Arc<StdMutex<Option<zbus::Connection>>>,
+    pub(super) input_bus: Arc<StdMutex<Option<zbus::Connection>>>,
     /// 当前 Console 路径（如 /org/qemu/Display1/Console_0）
-    console_path: Arc<StdMutex<Option<String>>>,
+    pub(super) console_path: Arc<StdMutex<Option<String>>>,
 }
 
 impl Default for CaptureState {
