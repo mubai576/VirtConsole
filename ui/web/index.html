@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VirtConsole</title>
+    <!-- xterm 走全局脚本（非 npm 依赖）：终端模块以 window.Terminal 取用，
+         vendor 目录由 vite publicDir 原样拷到 dist -->
+    <link rel="stylesheet" href="./vendor/xterm.css" />
+    <script src="./vendor/xterm.js"></script>
   </head>
   <body>
     <div id="root"></div>

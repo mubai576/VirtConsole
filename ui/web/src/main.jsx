@@ -1,9 +1,10 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "./styles/tokens.css";
 import "./styles/base.css";
-import Gallery from "./Gallery.jsx";
+import "./ui/ui.css";
+import "./styles/views.css";
+import App from "./App.jsx";
 import { applyTheme, applyScale } from "./lib/theme.js";
 import { invoke } from "./lib/ipc.js";
 
@@ -17,8 +18,5 @@ invoke("get_config")
   })
   .catch(() => {});
 
-createRoot(document.getElementById("root")).render(
-  <StrictMode>
-    <Gallery />
-  </StrictMode>
-);
+// 不套 StrictMode：终端/监控/帧监听是命令式副作用，双调用会起两个 PTY 与两组轮询
+createRoot(document.getElementById("root")).render(<App />);
