@@ -73,6 +73,9 @@ cmd_install() {
 
   # 3. 部署 systemd 服务
   install -m 0644 "${SRC_DIR}/deploy/virtconsole-weston.service" /etc/systemd/system/
+  # 共享 D-Bus 总线：必须独立成单元。曾由 virtconsole.service 的 ExecStartPre
+  # fork，落进该服务 cgroup，停服务时总线一起死、已挂上来的 QEMU 被孤立。
+  install -m 0644 "${SRC_DIR}/deploy/virtconsole-dbus.service" /etc/systemd/system/
   install -m 0644 "${SRC_DIR}/deploy/virtconsole.service" /etc/systemd/system/
   systemctl daemon-reload
 
@@ -106,6 +109,7 @@ EOF
     echo "       请编辑 PVE 连接（host/node/鉴权）后重启服务"
   fi
 
+  systemctl enable --now virtconsole-dbus.service
   systemctl enable --now virtconsole-weston.service virtconsole.service
   echo "完成。查看：systemctl status virtconsole-weston"
   echo "测试模式：VIRTCONSOLE_TEST=1 ${APP_BIN}（需 Wayland 环境）"
@@ -119,6 +123,18 @@ cmd_check() {
   command -v weston >/dev/null && echo "[OK] weston 已安装" || { echo "[FAIL] weston 缺失"; ok=0; }
   systemctl is-active --quiet seatd && echo "[OK] seatd 运行中" || { echo "[FAIL] seatd 未运行"; ok=0; }
   [[ -S /run/virtconsole/wayland-0 ]] && echo "[OK] Wayland socket 就绪" || echo "[WARN] Wayland socket 未就绪（服务启动后再查）"
+  # 总线必须由独立单元持有。若持有者落在 virtconsole.service 的 cgroup 里，
+  # 停 vc-ui 就会连总线一起杀掉、孤立已挂上来的 QEMU（capture_start 从此失败）。
+  if [[ -S /run/virtconsole/dbus ]]; then
+    dpid=$(pgrep -f 'address=unix:path=/run/virtconsole/dbus' | head -1)
+    if [[ -n "$dpid" ]] && grep -q virtconsole-dbus "/proc/${dpid}/cgroup" 2>/dev/null; then
+      echo "[OK] D-Bus 总线由 virtconsole-dbus 单元持有"
+    else
+      echo "[FAIL] D-Bus 总线不在 virtconsole-dbus 单元里（停 vc-ui 会孤立 QEMU）"; ok=0
+    fi
+  else
+    echo "[WARN] D-Bus socket 未就绪（服务启动后再查）"
+  fi
   command -v cargo >/dev/null && echo "[OK] cargo 存在" || echo "[WARN] cargo 缺失（构建机需 Rust）"
   [[ -x "${APP_BIN}" ]] && echo "[OK] ${APP_BIN} 已安装" || { echo "[FAIL] ${APP_BIN} 未安装"; ok=0; }
   [[ "$ok" -eq 1 ]] && echo "=== 自检通过 ===" || { echo "=== 自检存在失败项 ==="; exit 1; }
@@ -127,8 +143,9 @@ cmd_check() {
 cmd_remove() {
   need_root
   echo "=== 卸载 VirtConsole（保留系统包）==="
-  systemctl disable --now virtconsole.service virtconsole-weston.service 2>/dev/null || true
-  rm -f /etc/systemd/system/virtconsole.service /etc/systemd/system/virtconsole-weston.service
+  systemctl disable --now virtconsole.service virtconsole-weston.service virtconsole-dbus.service 2>/dev/null || true
+  rm -f /etc/systemd/system/virtconsole.service /etc/systemd/system/virtconsole-weston.service \
+        /etc/systemd/system/virtconsole-dbus.service
   systemctl daemon-reload
   rm -f "${APP_BIN}"
   rm -rf "${CONFIG_DIR}"
