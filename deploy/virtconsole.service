@@ -10,7 +10,9 @@ After=virtconsole-weston.service virtconsole-dbus.service
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=/run/virtconsole
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/virtconsole/dbus
-Environment=VIRTCONSOLE_AUTOCONNECT_VMID=9000
+# 不在这里写 VIRTCONSOLE_AUTOCONNECT_VMID：环境变量会盖掉 config.json 的
+# autoconnect_vmid，曾出现单元写死 9000（停机）而配置里是 9200 的对不上账。
+# 开机自连哪台由配置文件决定；调试时可临时用环境变量覆盖。
 Environment=GDK_BACKEND=wayland
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /run/virtconsole/dbus ] && exit 0; sleep 1; done; exit 1'
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /run/virtconsole/wayland-0 ] && exit 0; sleep 1; done; exit 1'
