@@ -115,7 +115,14 @@ const ConsoleLayer = forwardRef(function ConsoleLayer(_props, ref) {
   };
 
   return (
-    <div id="console-layer" className={visible ? "" : "hidden"}>
+    // class 必须有 console-layer：position:absolute/inset:0/背景黑/z-index:50
+    // 全挂在 .console-layer 上（views.css）。React 化时只留了 id，这四条一条
+    // 没生效——沉浸层退回普通文档流，实测 1280x643（落在页头之下而非覆盖
+    // 1280x720 视口），且 z-index 为 auto 压不住操作页 → 采集正常但看不到画面。
+    // 隐藏当时还正常，被通用 .hidden{display:none!important} 兜住了，
+    // 于是「退出」看着没问题、「进入」是空的。id 保留（测试规范 §3.2）。
+    // 守卫见套件 I2_layer_covers_viewport。
+    <div id="console-layer" className={`console-layer${visible ? "" : " hidden"}`}>
       <canvas id="vm-canvas" ref={canvasRef} onClick={refocus} style={{ objectFit: fitRef.current }} />
     </div>
   );

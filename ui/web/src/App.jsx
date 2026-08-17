@@ -76,7 +76,12 @@ function Shell({ consoleRef }) {
       </footer>
 
       <ConsoleLayer ref={consoleRef} />
-      <div id="toast" className={ui.toast ? "" : "hidden"}>{ui.toast}</div>
+      {/* class 必须有 toast：定位/玻璃底/淡出全在 .toast 上（views.css）。
+          尤其 .toast.hidden 特意写 display:block!important + opacity:0——toast
+          靠透明度淡出，不能真的 display:none。只留 id 的话会落到通用
+          .hidden{display:none!important}，toast 变硬切且无定位无背景。
+          kiosk 下没有 devtools，toast 是唯一的错误出口，坏了等于错误全静默。 */}
+      <div id="toast" className={`toast${ui.toast ? "" : " hidden"}`}>{ui.toast}</div>
     </>
   );
 }
