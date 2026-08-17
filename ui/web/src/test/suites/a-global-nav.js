@@ -7,7 +7,7 @@ export const suiteA = {
   label: "全局导航",
   async run() {
     await step("A1_tabs_render_home_active", async () => {
-      assert(qa("#tabbar .tab").length === 4, `count=${qa("#tabbar .tab").length}`);
+      assert(qa("#tabbar .tab").length === 5, `count=${qa("#tabbar .tab").length}`);
       assert(activeTabId() === "home", activeTabId());
     });
     await step("A2_tabbar_arrow_moves_ring", async () => {

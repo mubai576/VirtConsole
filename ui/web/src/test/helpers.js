@@ -1,7 +1,8 @@
 // 交互测试共享辅助（导航 / 定位 / 轮询），供各套件使用
 import { key, ctrlAltQ, wait, flush, q, qa, activeTabId, consoleVisible, assert, click } from "./framework.js";
 
-export const TABS = ["home", "vm", "browser", "settings"];
+// 顺序必须与 FocusProvider.TAB_DEFS 一致：gotoTab 靠下标差算要按几次 →
+export const TABS = ["home", "vm", "browser", "media", "settings"];
 
 // 轮询等待条件成立
 export async function waitFor(fn, timeout = 5000, stepMs = 150) {

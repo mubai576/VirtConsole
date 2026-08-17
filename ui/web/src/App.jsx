@@ -14,13 +14,14 @@ import ConsoleLayer from "./console/ConsoleLayer.jsx";
 import Home from "./views/Home.jsx";
 import Vm from "./views/Vm.jsx";
 import Browser from "./views/Browser.jsx";
+import Media from "./views/Media.jsx";
 import Settings from "./views/Settings.jsx";
 import { invoke, listen } from "./lib/ipc.js";
 import { getUiState, subscribe, setConnState, toast } from "./lib/uiStore.js";
 import { applyTheme, applyScale } from "./lib/theme.js";
 import { getTermExitHandler } from "./views/vm/terminalHost.js";
 
-const VIEWS = { home: Home, vm: Vm, browser: Browser, settings: Settings };
+const VIEWS = { home: Home, vm: Vm, browser: Browser, media: Media, settings: Settings };
 
 function Shell({ consoleRef }) {
   const { current, activeId, tabbarFocus, activate } = useFocusShell();

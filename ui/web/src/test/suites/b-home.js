@@ -43,10 +43,20 @@ export const suiteB = {
       assert(ok, "宿主状态无值");
     });
     await step("B7_mouse_sync", async () => {
-      const items = qa(".tile, .quick");
-      hover(items[items.length - 1]);
+      // 必须限定在**当前激活视图**内：五个视图常驻挂载，document 级 `.tile, .quick`
+      // 会捞到其它视图的同类元素，而非激活视图按单高亮不变量不允许带 .focused，
+      // 最后一项就永远断言失败。原先能过是巧合——那时文档里最后一个 .quick
+      // 恰好属于激活视图（浏览器），新增一个带 .quick 的视图就会顶掉这个位置。
+      // 注意此刻激活的是 browser 而非 home：B4 结尾的 goHome() 被地址栏吃掉了
+      // （Home 键落在 #browser-addr 上，Browser.onKey 返回 true，全局 Home 不再执行）。
+      const items = qa(".tab-view.active .tile, .tab-view.active .quick");
+      const last = items[items.length - 1];
+      hover(last);
       await flush(20);
-      assert(items[items.length - 1].classList.contains("focused"), "hover 未聚焦");
+      assert(
+        last.classList.contains("focused"),
+        `hover 未聚焦 active=${activeTabId()} n=${items.length} txt=${last.textContent}`
+      );
       key("ArrowLeft"); await flush(20);
       assert(qa(".focused").length === 1, "多高亮");
     });

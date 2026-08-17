@@ -21,6 +21,7 @@ export const TAB_DEFS = [
   { id: "home", label: "首页" },
   { id: "vm", label: "虚拟机" },
   { id: "browser", label: "浏览器" },
+  { id: "media", label: "影视" },
   { id: "settings", label: "设置" },
 ];
 

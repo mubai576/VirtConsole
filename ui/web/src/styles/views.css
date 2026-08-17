@@ -196,6 +196,10 @@
   text-align: right;
 }
 
+/* ===== 影视（沿用首页的 .tile / .quick，只需容器） ===== */
+.media-view { display: flex; flex-direction: column; }
+.media-view .home-section:first-child { margin-top: 0; }
+
 /* ===== 浏览器 ===== */
 .browser-view { display: flex; flex-direction: column; gap: 2.25rem; max-width: 110rem; }
 .browser-head { display: flex; gap: 1.5rem; }
