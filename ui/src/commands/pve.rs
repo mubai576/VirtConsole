@@ -32,10 +32,23 @@ pub async fn pve_connect(
         })
     };
     let mut cli = crate::pve::PveClient::new(&auth);
-    let msg = cli.connect().await?;
-    *state.client.lock().await = Some(cli);
-    let _ = app.emit("pve-status", json!({ "state": "ok" }));
-    Ok(msg)
+    // 成败都进 journal。原先失败只在前端弹一次 toast，journal 里一个字都没有，
+    // 于是「为什么显示未连接」只能靠猜 —— 而 pve_connect 只在启动时跑一次，
+    // toast 划过去就再也拿不到了。host 打出来是为了区分「配置没读到」
+    // （host=mock:// 说明 config.json 里没有 pve 段）和「连上了但被拒」。
+    match cli.connect().await {
+        Ok(msg) => {
+            eprintln!("[PVE] 连接成功 host={} node={}", auth.host, auth.node);
+            *state.client.lock().await = Some(cli);
+            let _ = app.emit("pve-status", json!({ "state": "ok" }));
+            Ok(msg)
+        }
+        Err(e) => {
+            eprintln!("[PVE] 连接失败 host={} node={}: {e}", auth.host, auth.node);
+            let _ = app.emit("pve-status", json!({ "state": "err" }));
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
