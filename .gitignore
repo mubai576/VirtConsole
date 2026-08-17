@@ -10,6 +10,10 @@ dist
 ui/gen
 ui/target
 
+# 本地凭据（测试机密码等，见 docs/51-测试环境.md）
+.secrets/
+__pycache__/
+
 # 系统 / 编辑器
 *.log
 .DS_Store
