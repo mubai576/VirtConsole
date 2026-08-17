@@ -153,7 +153,16 @@ impl ScanoutListener {
         Ok(())
     }
 
-    /// 声明支持 Unix.Map（gl=off 备选；Scanout/Update 为基础接口无需声明）
+    /// 故意返回空：**不**声明 `org.qemu.Display1.Listener.Unix.Map`。
+    ///
+    /// `Scanout`/`Update` 是基础接口，无需声明即可收到，当前 85fps 够用。
+    /// 声明 Unix.Map 会让 QEMU 改走 `ScanoutMap` 递 fd，但本 Listener 没实现
+    /// `scanout_map` 方法——声明了却不实现会让画面直接断掉。
+    ///
+    /// 想启用共享内存零拷贝，顺序是：先拿 `spike-dbus` 在 **gl=off** 下实测
+    /// QEMU 是否真的发 `ScanoutMap`（M2.5 的 C3 只在 gl=on 下收到
+    /// `Scanout`/`ScanoutDMABUF`，**没收到 ScanoutMap**，见 90-历史记录.md），
+    /// 确认发了再把 spike 的实现搬进来、同时改这里。别只改这一行。
     #[zbus(property, name = "Interfaces")]
     fn interfaces(&self) -> Vec<String> {
         vec![]
