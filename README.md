@@ -1,129 +1,82 @@
 # VirtConsole — PVE 一体化 HDMI 自研终端系统
 
-在 PVE 宿主机（实测 PVE 9.x / Debian 13）上运行的本地 HDMI 终端：无桌面会话、无容器，
-Weston Kiosk 全屏渲染 + 自研 Rust 应用，最终形态见 `docs/` 下的 PRD（V1.1 修订稿）。
+在 PVE 宿主机（实测 PVE 9.2 / Debian 13）上运行的本地 HDMI 终端：无桌面会话、无容器，
+Weston Kiosk 全屏渲染 + 自研 Rust 应用（Tauri 2）+ 十英尺 UI（遥控器/方向键操作）。
 
-## 当前状态（里程碑 1：HDMI 单应用渲染 —— 已完成）
+## 当前状态
 
-第一步要解决整个系统最基础的问题：**真实环境下，一块 HDMI 屏上只跑一个自研应用**。
-该里程碑已在真机（PVE 9.2 + RTX 5070 Ti）上验证通过并部署为开机自启服务，
-详见 [docs/里程碑1-真机部署与验证记录.md](docs/里程碑1-真机部署与验证记录.md)。
-模式 1（QMP screendump 办公采集）已接入：HDMI 显示测试虚拟机（VM 9000）的实时画面。
-Tauri 主界面骨架已完成：十英尺 UI（电视 / PS5 / Xbox / Apple TV 风格焦点导航），
-纯 HTML/CSS/JS 实现（无 Node 依赖），方向键移动高亮、Enter 确认、Esc 返回。
-**QMP 已整合进 Tauri**：VM 画面经单条 QMP 连接推送到前端 Canvas，
-界面按键经 IPC 走同一条连接投递到虚拟机；kiosk 服务已切换到 vc-ui。
-**内置浏览器已实现**：每个标签页 = 独立 Webview 窗口，支持任意 http/https
-页面（含 PVE 后台）；电视风格地址栏 + 快速链接 + 标签条。
+V1.0 与 V2.0 已在真机部署验证；V3.0（miuix 重构）P0–P4 完成，只剩 P5 真机回归。
 
-> **V1.0 功能状态**：设计稿见 [docs/V1.0-UI与功能设计.md](docs/V1.0-UI与功能设计.md)。
-> P1 设计系统+导航重构 / P2 PVE 运维闭环 / P3 实体监控 / P4 宿主终端 / P5 设置 均已实现
-> 并部署至真机，详见 [docs/自动化测试.md](docs/自动化测试.md)（测试模式插桩，20 场景 E2E 真机通过）。
-
-- Weston Kiosk（Wayland / DRM 后端）开机自启，全屏独占 HDMI
-- 一个全屏 Rust 应用（winit + softbuffer）直接渲染测试图案到 HDMI
-- 启动前环境自检：GPU 缺失、Wayland 未就绪时输出明确的中文错误并正常退出，**不崩溃**
-- 开发机上可用 Mock 模式跑通同一套渲染代码（无需 GPU / Weston）
-
-> 说明：本里程碑用 winit + softbuffer 作为最简渲染层（无 WebKitGTK 依赖），
-> 先把 HDMI 渲染链路跑通；Tauri 主界面在下一个里程碑再接入。
+**文档从 [docs/00-索引.md](docs/00-索引.md) 进入**——那里有任务路由表、术语表和代码地图。
+只想知道「现在到哪了」看 [docs/01-当前状态.md](docs/01-当前状态.md)。
 
 ## 项目结构
 
 ```text
 VirtConsole/
 ├── Cargo.toml                # Rust workspace
-├── docs/                     # PRD（V1.1）+ 里程碑部署记录 + 测试环境
-├── host/                     # 宿主机渲染终端（Rust）
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs           # 窗口 + 渲染 + 事件循环
-│       └── environment.rs    # 启动前环境自检（GPU / Wayland）
+├── docs/                     # 全部文档，入口是 00-索引.md
+├── host/                     # 最简渲染层（winit + softbuffer，Mock / 回退用）
 ├── qmp-engine/               # QMP 引擎（VM 状态/启停/键鼠投递/screendump）
-│   ├── Cargo.toml
 │   ├── src/lib.rs
-│   └── examples/probe.rs     # 连接探针示例
-├── ui/                       # Tauri 主界面（十英尺 UI）
-│   ├── src/                  # Rust 入口 + IPC 命令
-│   ├── frontend/             # 纯 HTML/CSS/JS（无 Node）
-│   ├── capabilities/
+│   └── examples/probe.rs     # 连接探针
+├── ui/                       # Tauri 主界面（vc-ui）
+│   ├── src/                  # lib.rs 只做装配
+│   │   ├── commands/         # IPC 命令，按 State 依赖分文件
+│   │   ├── capture/          # dbus-display 采集（session/keymap/frame/dbus_input）
+│   │   ├── input.rs          # 输入 sink 选择：D-Bus 可用走 D-Bus，否则 QMP
+│   │   └── pve.rs config.rs term.rs browser.rs testmode.rs
+│   ├── web/                  # 前端（Vite + React，在用；package.json 在这里，不在仓库根）
+│   ├── frontend/             # 旧前端（纯 HTML/JS，P5 通过后删）
+│   ├── dist/                 # 前端构建产物（不提交，frontendDist 指向它）
 │   └── tauri.conf.json
-├── deploy/                   # systemd 服务单元
-│   ├── virtconsole-weston.service
-│   └── virtconsole.service
-├── spike-dbus/               # V2.0 前置 spike：dbus-display Listener 探针（独立 crate）
+├── deploy/                   # systemd 服务单元（weston + dbus + 应用）
+├── spike-dbus/               # dbus-display Listener 探针（独立 crate）
 └── scripts/
-    ├── install.sh            # 一键安装 / 部署
+    ├── install.sh            # install / check / remove / build / web
     ├── check.sh              # 环境自检
     ├── remove.sh             # 卸载（保留系统包）
-    └── spike-qemu-check.sh   # V2.0 spike：QEMU dbus-display / OpenGL 能力检测
+    └── spike-qemu-check.sh   # QEMU dbus-display / OpenGL 能力检测
 ```
 
 ## 快速开始
 
 ### 开发机（Windows / Linux，无需 GPU）
 
-Windows 开发机需要安装 Rust（MSVC 目标）与 Visual Studio Build Tools（含"使用 C++ 的桌面开发"组件），
-否则编译会报找不到 `link.exe`。
+Windows 需要 Rust（MSVC 目标）+ Visual Studio Build Tools（含「使用 C++ 的桌面开发」），
+否则报找不到 `link.exe`。前端需要 Node ≥ 20.19。
 
 ```bash
-VIRTCONSOLE_MOCK=1 cargo run -p virtconsole-host
+cd ui/web && npm ci && npm run build && cd ../..   # 必须先于 cargo build
+cargo run -p vc-ui
 ```
 
-（Windows 下自动进入 Mock 模式；Linux 开发机也可用上面的环境变量跳过校验。）
+`ui/dist/` 不提交仓库，跳过前端构建会导致 `cargo build` 失败。
 
 ### 真机（PVE 宿主机）
 
-真机需先安装 NVIDIA 驱动（Blackwell 显卡必须用 nvidia-open 开源内核模块，
-详见部署记录第 3.2 节），再执行：
+Blackwell 显卡必须用 `nvidia-open` 开源内核模块。完整步骤见
+[docs/50-部署运维.md](docs/50-部署运维.md)。
 
 ```bash
-# 1. 构建
-cargo build --release
-
-# 2. 安装：装依赖、创建运行用户、部署 systemd 服务
-sudo ./scripts/install.sh
-
-# 3. 查看状态（HDMI 上应出现全屏测试图案）
-systemctl status virtconsole-weston
-systemctl status virtconsole
+sudo ./scripts/install.sh build     # 前端产物 + release 二进制
+sudo ./scripts/install.sh           # 装依赖、建用户、部署 systemd
+systemctl status virtconsole-weston virtconsole
 journalctl -u virtconsole -f
 ```
-
-## 环境自检设计（对应需求）
-
-应用启动前执行 `environment::check()`：
-
-- **Wayland 会话缺失** → 明确提示检查 Weston 服务
-- **宿主机 GPU 缺失**（`/dev/dri` 无 `card*` / `renderD*`）→ 列出排查步骤并退出
-- **仅有一块显卡且开启 SR-IOV / 直通后宿主机无可用 GPU** → 同样被上述检查拦截，给出提示
-- 开发调试可用 `VIRTCONSOLE_MOCK=1` 跳过校验
-
-`scripts/check.sh` 提供同类的安装前自检（GPU / 渲染节点、Weston、seatd、
-Wayland socket、内核模块）。
 
 ## 测试
 
 ```bash
-# 单元测试（离线，含 pve 解析 / config 读写 / qmp 协议）
-cargo test --workspace
-
-# 全流程 E2E（测试模式：20 场景，有真实 PVE 配置则连真实后端）
-VIRTCONSOLE_TEST=1 cargo run -p vc-ui
-echo "exit=$?"   # 0 全过 / 1 有失败 / 2 看门狗超时
+cargo test --workspace                # 单测 30（vc-ui）+ 7（qmp-engine）
+VIRTCONSOLE_TEST=1 cargo run -p vc-ui # 全流程 E2E：80 场景 / 13 套件
+echo "exit=$?"                        # 0 全过 / 1 有失败 / 2 看门狗超时
 ```
 
-详见 [docs/自动化测试.md](docs/自动化测试.md)。
+套件清单、用例矩阵与测试契约见 [docs/40-测试规范.md](docs/40-测试规范.md)。
 
-## 下一步
+## 环境自检
 
-1. **M2.5 V2.0 前置 spike（已验证 ✅）**：dbus-display + dmabuf 链路真机验证通过
-   （C1-C5 全过，PVE 自带 QEMU 11.0.0 支持 dbus-display，免自编译）。
-   关键结论：NVIDIA 私有 DMABUF modifier 不可外部 EGL 导入；Scanout/Update 像素事件路径
-   （gl=off）实测 ~85fps 可用，建议作为 V2.0 基础。
-   详见 [docs/里程碑2.5-V2.0前置技术验证计划.md](docs/里程碑2.5-V2.0前置技术验证计划.md) §五。
-2. **V2.0 规划（待排期）**：以 Scanout/Update 像素路径 + 现有 Canvas 渲染起步，
-   同步评估 linear DMABUF（方案 B）作为性能增强。
-3. 手机遥控基础版（WebSocket 指令，复用 QMP 连接）—— V1.0 已延后（设计保留）
-4. 画面模式切换（办公 / 游戏 / 直通）—— 模式 1 已接入，模式 2 见上，模式 3 待 V3.0
-5. VM 终端（串口控制台）待 V2.0+
+应用启动前执行 `environment::check()`：Wayland 会话缺失、`/dev/dri` 无 `card*`/`renderD*`
+时输出明确的中文错误并正常退出（**不崩溃**）。`VIRTCONSOLE_MOCK=1` 跳过校验。
+安装前的同类自检用 `scripts/check.sh`。

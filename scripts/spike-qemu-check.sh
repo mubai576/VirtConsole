@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # VirtConsole V2.0 前置 spike：QEMU dbus-display / OpenGL 能力检测
 #
-# 对应判据 C1（见 docs/里程碑2.5-V2.0前置技术验证计划.md）：
+# 对应判据 C1（见 docs/21-采集与输入.md）：
 #   1. PVE 所用 QEMU 是否支持 -display dbus（编译时）
 #   2. QEMU GL 相关库（gbm / egl / epoxy / drm）是否齐备
 #   3. 宿主机 GPU 渲染节点与 nvidia_drm 模块

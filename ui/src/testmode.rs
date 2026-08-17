@@ -1,6 +1,6 @@
 //! 测试模式（插桩）：`VIRTCONSOLE_TEST=1` 时启用。
 //!
-//! 应用启动后前端动态加载 `frontend/test/driver.js` 跑全流程场景，
+//! 应用启动后前端动态加载 `web/src/test/driver.js` 跑全流程场景，
 //! 经 `test_report` 上报结果，Rust 打印摘要并以 0/1 退出码结束。
 //! 提供看门狗：若 120s 内未收到报告则以退出码 2 终止（防止 GUI 测试挂起）。
 

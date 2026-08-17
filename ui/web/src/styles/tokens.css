@@ -1,7 +1,7 @@
 /* ===== miuix 设计 token 移植 =====
  * 数值取自 miuix 源码（compose-miuix-ui/miuix, miuix-ui/src/commonMain/.../theme/）：
  *   Colors.kt / TextStyles.kt / basic/*Defaults
- * 尺度按十英尺 UI 放大约 1.9×，基准 2K（详见 docs/V3.0-miuix重构方案.md §二）
+ * 尺度按十英尺 UI 放大约 1.9×，基准 2K（详见 docs/30-UI设计规范.md §六）
  */
 
 /* ---------- 缩放模型 ----------

@@ -12,7 +12,7 @@
 //!   --export-scanout <path> 收到首个 Scanout 后把像素数据(raw)写到该文件
 //!                           （配合 c/scanout-check.py 校验画面非空）
 //!
-//! 验证判据（见 docs/里程碑2.5）：C2 对象树可见 / C3 收到 Scanout|ScanoutMap / C4 收到 ScanoutDMABUF
+//! 验证判据（见 docs/90-历史记录.md M2.5）：C2 对象树可见 / C3 收到 Scanout|ScanoutMap / C4 收到 ScanoutDMABUF
 //!
 //! 连接方式参考 QEMU tests/qtest/dbus-display-test.c：
 //!   探针侧以 AUTHENTICATION_CLIENT 身份，QEMU 侧为 AUTHENTICATION_SERVER。
