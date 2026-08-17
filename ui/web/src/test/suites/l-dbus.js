@@ -231,15 +231,37 @@ export const suiteL7 = {
       await invoke("capture_stop").catch(() => {});
     });
 
-    await step("L7_printable_goes_to_text_channel", async () => {
+    // §7 记录（2026-08-17）：本测试**语义整体反转**，原名
+    // `L7_printable_goes_to_text_channel`，断言的是「可打印字符走文本通道」。
+    // 那个行为本身是 bug：文本通道按下即抬起，字母/数字/标点/空格在 guest 侧
+    // 从来没有按住状态 —— 按住不连发、游戏按住 W 不走路、测键工具看不到常亮，
+    // 真机上的表现就是「不是全键盘映射」。现在有 code 就走按键通道，
+    // 文本通道只留给 IME / 无 code 的合成事件。
+    await step("L7_printable_uses_key_channel_not_text", async () => {
       await enterConsole();
+      window.__vcInputLogClear();
       key("a", { code: "KeyA" });
       await flush(200);
-      const log = window.__vcInputLog();
-      assert(log.some((e) => e.kind === "capture_input_text" && e.text === "a"),
-        `可打印字符应走文本通道（日志 ${JSON.stringify(log)}）`);
-      assert(!log.some((e) => e.kind === "capture_input_key" && e.code === "KeyA"),
-        "可打印字符不应同时走按键通道（会重复输入）");
+      let log = window.__vcInputLog();
+      assert(log.some((e) => e.kind === "capture_input_key" && e.code === "KeyA" && e.down === true),
+        `可打印字符必须走按键通道，否则 guest 侧没有按住状态（日志 ${JSON.stringify(log)}）`);
+      assert(!log.some((e) => e.kind === "capture_input_text"),
+        "不应再走文本通道（会与按键通道重复输入）");
+
+      // 空格曾是最隐蔽的一个：e.key === " " 长度也是 1，被归进了可打印字符
+      window.__vcInputLogClear();
+      key(" ", { code: "Space" });
+      await flush(200);
+      log = window.__vcInputLog();
+      assert(log.some((e) => e.kind === "capture_input_key" && e.code === "Space"),
+        `空格必须走按键通道（日志 ${JSON.stringify(log)}）`);
+
+      // 长按连发不能重复转发：scancode 语义下键本来就按住着，guest 自己连发
+      window.__vcInputLogClear();
+      key("a", { code: "KeyA", repeat: true });
+      await flush(150);
+      assert(window.__vcInputLog().length === 0,
+        "e.repeat 的 keydown 被转发了——会让连发速率翻倍且 guest 的连发设置失效");
       await leave();
     });
 

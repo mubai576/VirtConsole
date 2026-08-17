@@ -39,6 +39,14 @@ pub fn code_to_qmp(code: &str) -> Option<&'static str> {
         "ControlLeft" => "ctrl", "ControlRight" => "ctrl_r",
         "ShiftLeft" => "shift", "ShiftRight" => "shift_r",
         "AltLeft" => "alt", "AltRight" => "alt_r",
+        // Win 键 / 菜单键 / NumLock：与 keymap.rs 同批补上。名字取自真机读到的
+        // QKeyCode 枚举（meta_l / meta_r / menu / num_lock）
+        // OSLeft/OSRight 是 WebKitGTK 实际发的名字（DOM3 早期草案），
+        // MetaLeft/MetaRight 是现行标准。两套都收，否则 D-Bus 未就绪时
+        // Win 键会在回退路径上重新消失一次。
+        "MetaLeft" | "OSLeft" => "meta_l",
+        "MetaRight" | "OSRight" => "meta_r",
+        "ContextMenu" => "menu", "NumLock" => "num_lock",
         "ArrowUp" => "up", "ArrowDown" => "down",
         "ArrowLeft" => "left", "ArrowRight" => "right",
         "Insert" => "insert", "Delete" => "delete",
@@ -56,6 +64,24 @@ pub fn code_to_qmp(code: &str) -> Option<&'static str> {
         "NumpadMultiply" => "kp_multiply", "NumpadDivide" => "kp_divide",
         "NumpadDecimal" => "kp_decimal",
         "PrintScreen" => "print", "ScrollLock" => "scroll_lock", "Pause" => "pause",
+        // 多媒体键：与 keymap.rs 的 MEDIA_CODES 一一对应。名字取自真机读到的
+        // QKeyCode 枚举（162 个名字那份），不是猜的。
+        // Fn 键本身不在这里也不该在 —— 它没有 scancode，浏览器根本发不出来。
+        "AudioVolumeMute" => "audiomute",
+        "AudioVolumeDown" => "volumedown",
+        "AudioVolumeUp" => "volumeup",
+        "MediaPlayPause" => "audioplay",   // QEMU 只有 audioplay，guest 侧就是播放/暂停切换
+        "MediaStop" => "audiostop",
+        "MediaTrackNext" => "audionext",
+        "MediaTrackPrevious" => "audioprev",
+        "LaunchMediaPlayer" => "mediaselect",
+        "LaunchMail" => "mail",
+        "LaunchApp1" => "computer",         // 我的电脑
+        "LaunchApp2" => "calculator",
+        "BrowserHome" => "ac_home", "BrowserRefresh" => "ac_refresh",
+        "BrowserBack" => "ac_back", "BrowserForward" => "ac_forward",
+        "BrowserFavorites" => "ac_bookmarks",
+        "Sleep" => "sleep", "WakeUp" => "wake", "Power" => "power",
         _ => return None,
     };
     Some(name)
@@ -125,24 +151,41 @@ pub async fn text(qmp_state: &QmpState, text: String) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// 回退不能比主路径少键。
+    ///
+    /// §7 记录（2026-08-17）：名单从**手抄改为共享** `keymap::ALL_CODES`。
+    /// 原来这里自己抄了一份，抄的时候漏了 MetaLeft/MetaRight/ContextMenu/NumLock，
+    /// 而 keymap.rs 那边也缺这几个键 —— 两份名单一起缺，断言就一直是绿的。
+    /// 这正是「不是全键盘映射」能活到真机的原因之一：守卫和被守的对象抄的是同一个错。
     #[test]
     fn qmp_names_cover_the_dbus_keymap() {
-        // 回退不能比主路径少键：capture::code_to_keycode 认的 code，这里也必须认。
-        // 名单与 capture.rs 的 match 同步；新增按键时两处一起加，此断言会挡住漏改。
-        const CODES: &[&str] = &[
-            "KeyA", "KeyZ", "Digit0", "Digit9", "F1", "F11", "F12",
-            "Enter", "NumpadEnter", "Escape", "Backspace", "Tab", "Space", "CapsLock",
-            "ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight", "AltLeft", "AltRight",
-            "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-            "Insert", "Delete", "Home", "End", "PageUp", "PageDown",
-            "Minus", "Equal", "BracketLeft", "BracketRight", "Backslash",
-            "Semicolon", "Quote", "Backquote", "Comma", "Period", "Slash",
-            "Numpad0", "Numpad9", "NumpadAdd", "NumpadSubtract", "NumpadMultiply",
-            "NumpadDivide", "NumpadDecimal",
-            "PrintScreen", "ScrollLock", "Pause",
-        ];
-        for c in CODES {
+        use crate::capture::keymap::{ALL_CODES, MEDIA_CODES};
+        for c in ALL_CODES.iter().chain(MEDIA_CODES.iter()) {
             assert!(code_to_qmp(c).is_some(), "QMP 回退缺少按键映射: {c}");
+        }
+    }
+
+    /// 回退路径也必须认 WebKitGTK 的旧名，否则 D-Bus 未就绪时 Win 键又没了
+    #[test]
+    fn qmp_accepts_webkit_legacy_aliases() {
+        for (alias, canonical) in crate::capture::keymap::ALIASES {
+            assert!(code_to_qmp(alias).is_some(), "QMP 回退缺别名: {alias}");
+            assert_eq!(code_to_qmp(alias), code_to_qmp(canonical), "{alias} 与 {canonical} 应同名");
+        }
+        assert_eq!(code_to_qmp("OSLeft"), Some("meta_l"));
+    }
+
+    /// QMP 侧同样不能让两个键指向同一个 QKeyCode
+    #[test]
+    fn qmp_names_are_distinct_for_paired_keys() {
+        const PAIRS: &[(&str, &str)] = &[
+            ("ControlLeft", "ControlRight"), ("ShiftLeft", "ShiftRight"),
+            ("AltLeft", "AltRight"), ("MetaLeft", "MetaRight"),
+            ("Enter", "NumpadEnter"), ("Slash", "NumpadDivide"),
+            ("ArrowUp", "Numpad8"), ("Insert", "Numpad0"), ("Delete", "NumpadDecimal"),
+        ];
+        for (a, b) in PAIRS {
+            assert_ne!(code_to_qmp(a), code_to_qmp(b), "{a} 与 {b} 在 QMP 侧同名");
         }
     }
 

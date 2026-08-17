@@ -28,6 +28,16 @@ trait QemuMouse {
 
 /// 键盘事件：code 为浏览器 KeyboardEvent.code，down 为按下/抬起。
 pub async fn input_key(state: &CaptureState, code: String, down: bool) -> Result<(), String> {
+    // 排障用（VC_INPUT_TRACE=1 时开）：键盘走的是 p2p D-Bus 连接，不经过总线，
+    // 所以 dbus-monitor 抓不到。没有这条日志时，「键没送出」和「键没到应用层」
+    // 在外部完全无法区分 —— 上一轮就是卡在这里。
+    let trace = std::env::var("VC_INPUT_TRACE").is_ok();
+    if trace {
+        match code_to_keycode(&code) {
+            Some(kc) => eprintln!("[input] code={code} -> 0x{kc:02x} down={down}"),
+            None => eprintln!("[input] code={code} 无映射（会报错）down={down}"),
+        }
+    }
     let kc = code_to_keycode(&code)
         .ok_or_else(|| format!("不支持的按键: {code}"))?;
     let bus = state.input_bus.lock().unwrap().clone()
