@@ -6,6 +6,7 @@
 //! 用法（PVE 宿主机，VM 需运行）：
 //!   cargo run -p qmp-engine --example bench-screendump -- /var/run/qemu-server/<vmid>.qmp [次数]
 
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]

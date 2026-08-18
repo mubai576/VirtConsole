@@ -61,9 +61,7 @@ fn parse_number(data: &[u8], pos: &mut usize) -> Result<u32, String> {
 
 fn skip_ws_and_comments(data: &[u8], mut pos: usize) -> Result<usize, String> {
     loop {
-        while pos < data.len()
-            && matches!(data[pos], b' ' | b'\t' | b'\r' | b'\n')
-        {
+        while pos < data.len() && matches!(data[pos], b' ' | b'\t' | b'\r' | b'\n') {
             pos += 1;
         }
         if pos < data.len() && data[pos] == b'#' {

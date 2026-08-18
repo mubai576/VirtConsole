@@ -193,7 +193,9 @@ impl QmpClient {
             Some(args) => json!({ "execute": execute, "arguments": args }),
             None => json!({ "execute": execute }),
         };
-        self.transport.send_line(&serde_json::to_string(&msg)?).await?;
+        self.transport
+            .send_line(&serde_json::to_string(&msg)?)
+            .await?;
 
         loop {
             let line = self.transport.read_line().await?;
@@ -247,9 +249,7 @@ impl QmpClient {
         if let Some(f) = format {
             args["format"] = json!(f);
         }
-        self.command("screendump", Some(args))
-            .await
-            .map(|_| ())
+        self.command("screendump", Some(args)).await.map(|_| ())
     }
 
     /// screendump 到文件并解析为 RGB 帧（PPM，模式 1 采集的核心路径）。
@@ -263,7 +263,9 @@ impl QmpClient {
     /// 批量发送输入事件（QMP 的 input-send-event 要求 events 数组，可一次多条）。
     pub async fn send_events(&mut self, events: Vec<Value>) -> QmpResult<()> {
         let args = json!({ "events": events });
-        self.command("input-send-event", Some(args)).await.map(|_| ())
+        self.command("input-send-event", Some(args))
+            .await
+            .map(|_| ())
     }
 
     /// 生成单个键盘事件（QKeyCode，QAPI alternate 形式）
@@ -410,7 +412,9 @@ mod tests {
 
     #[tokio::test]
     async fn command_propagates_qmp_error() {
-        let transport = MockQmpTransport::new(vec![r#"{"error":{"class":"CommandNotFound","desc":"bad"}}"#]);
+        let transport = MockQmpTransport::new(vec![
+            r#"{"error":{"class":"CommandNotFound","desc":"bad"}}"#,
+        ]);
         let mut client = QmpClient::with_transport(Box::new(transport));
         assert!(matches!(client.status().await, Err(QmpError::Rpc(_))));
     }

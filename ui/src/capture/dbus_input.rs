@@ -38,11 +38,18 @@ pub async fn input_key(state: &CaptureState, code: String, down: bool) -> Result
             None => eprintln!("[input] code={code} 无映射（会报错）down={down}"),
         }
     }
-    let kc = code_to_keycode(&code)
-        .ok_or_else(|| format!("不支持的按键: {code}"))?;
-    let bus = state.input_bus.lock().unwrap().clone()
+    let kc = code_to_keycode(&code).ok_or_else(|| format!("不支持的按键: {code}"))?;
+    let bus = state
+        .input_bus
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM（先启动采集）")?;
-    let path = state.console_path.lock().unwrap().clone()
+    let path = state
+        .console_path
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM")?;
     let kb = QemuKeyboardProxy::builder(&bus)
         .path(path.as_str())
@@ -60,9 +67,17 @@ pub async fn input_key(state: &CaptureState, code: String, down: bool) -> Result
 
 /// 文本输入：逐字符发送（含 Shift 修饰）。
 pub async fn input_text(state: &CaptureState, text: String) -> Result<(), String> {
-    let bus = state.input_bus.lock().unwrap().clone()
+    let bus = state
+        .input_bus
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM（先启动采集）")?;
-    let path = state.console_path.lock().unwrap().clone()
+    let path = state
+        .console_path
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM")?;
     let kb = QemuKeyboardProxy::builder(&bus)
         .path(path.as_str())
@@ -71,8 +86,7 @@ pub async fn input_text(state: &CaptureState, text: String) -> Result<(), String
         .await
         .map_err(|e| e.to_string())?;
     for c in text.chars() {
-        let (kc, shift) = char_to_shift_keycode(c)
-            .ok_or_else(|| format!("无法发送字符: {c}"))?;
+        let (kc, shift) = char_to_shift_keycode(c).ok_or_else(|| format!("无法发送字符: {c}"))?;
         if shift {
             kb.press(42).await.map_err(|e| e.to_string())?; // ShiftLeft
         }
@@ -87,9 +101,17 @@ pub async fn input_text(state: &CaptureState, text: String) -> Result<(), String
 
 /// 鼠标绝对移动：x,y 为画面内坐标（0..宽高）。
 pub async fn mouse_move(state: &CaptureState, x: u32, y: u32) -> Result<(), String> {
-    let bus = state.input_bus.lock().unwrap().clone()
+    let bus = state
+        .input_bus
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM（先启动采集）")?;
-    let path = state.console_path.lock().unwrap().clone()
+    let path = state
+        .console_path
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM")?;
     let mouse = QemuMouseProxy::builder(&bus)
         .path(path.as_str())
@@ -97,15 +119,26 @@ pub async fn mouse_move(state: &CaptureState, x: u32, y: u32) -> Result<(), Stri
         .build()
         .await
         .map_err(|e| e.to_string())?;
-    mouse.set_abs_position(x, y).await.map_err(|e| e.to_string())?;
+    mouse
+        .set_abs_position(x, y)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// 鼠标按键：button 0=左 1=中 2=右。
 pub async fn mouse_button(state: &CaptureState, button: u32, down: bool) -> Result<(), String> {
-    let bus = state.input_bus.lock().unwrap().clone()
+    let bus = state
+        .input_bus
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM（先启动采集）")?;
-    let path = state.console_path.lock().unwrap().clone()
+    let path = state
+        .console_path
+        .lock()
+        .unwrap()
+        .clone()
         .ok_or("未连接 VM")?;
     let mouse = QemuMouseProxy::builder(&bus)
         .path(path.as_str())

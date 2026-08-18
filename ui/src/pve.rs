@@ -146,10 +146,15 @@ impl PveClient {
                 "username": self.auth.username.clone().unwrap_or_default(),
                 "password": self.auth.password.clone().unwrap_or_default(),
             });
-            let resp = self.raw_post_plain("/api2/json/access/ticket", body).await?;
+            let resp = self
+                .raw_post_plain("/api2/json/access/ticket", body)
+                .await?;
             let data = &resp["data"];
             let ticket = data["ticket"].as_str().unwrap_or_default().to_string();
-            let csrf = data["CSRFPreventionToken"].as_str().unwrap_or_default().to_string();
+            let csrf = data["CSRFPreventionToken"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             if ticket.is_empty() {
                 return Err("PVE 登录失败：未返回 ticket（请检查用户名/密码与 API 权限）".into());
             }
@@ -168,7 +173,9 @@ impl PveClient {
     /// 实体列表：宿主机（实体 0）+ 各 VM。
     pub async fn list_entities(&self) -> Result<Vec<Entity>, String> {
         let mut out = Vec::new();
-        let host = self.get(&format!("/api2/json/nodes/{}/status", self.node)).await?;
+        let host = self
+            .get(&format!("/api2/json/nodes/{}/status", self.node))
+            .await?;
         let h = &host["data"];
         out.push(Entity {
             kind: "host".into(),
@@ -186,9 +193,7 @@ impl PveClient {
             pve_version: Some(self.version.clone()),
         });
 
-        let vms = self
-            .get("/api2/json/cluster/resources?type=vm")
-            .await?;
+        let vms = self.get("/api2/json/cluster/resources?type=vm").await?;
         if let Some(arr) = vms["data"].as_array() {
             for it in arr {
                 out.push(Entity {
@@ -211,10 +216,16 @@ impl PveClient {
         // 注意：VM 配置端点是 /qemu/{vmid}/config；
         // 裸 /qemu/{vmid} 返回的是子目录列表（config/status/...）
         let cfg = self
-            .get(&format!("/api2/json/nodes/{}/qemu/{vmid}/config", self.node))
+            .get(&format!(
+                "/api2/json/nodes/{}/qemu/{vmid}/config",
+                self.node
+            ))
             .await?;
         let cur = self
-            .get(&format!("/api2/json/nodes/{}/qemu/{vmid}/status/current", self.node))
+            .get(&format!(
+                "/api2/json/nodes/{}/qemu/{vmid}/status/current",
+                self.node
+            ))
             .await?;
         let c = &cfg["data"];
         // PVE 的 /config 里 memory 可能是字符串（如 "2048"），统一健壮解析
@@ -236,7 +247,10 @@ impl PveClient {
         Ok(VmDetail {
             vmid,
             name: c["name"].as_str().unwrap_or("").to_string(),
-            status: cur["data"]["status"].as_str().unwrap_or("unknown").to_string(),
+            status: cur["data"]["status"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string(),
             cores,
             memory,
             disk,
@@ -257,7 +271,10 @@ impl PveClient {
 
     pub async fn snapshots(&self, vmid: u32) -> Result<Vec<Snapshot>, String> {
         let v = self
-            .get(&format!("/api2/json/nodes/{}/qemu/{vmid}/snapshot", self.node))
+            .get(&format!(
+                "/api2/json/nodes/{}/qemu/{vmid}/snapshot",
+                self.node
+            ))
             .await?;
         let mut out = Vec::new();
         if let Some(arr) = v["data"]["snapshots"].as_array() {
@@ -284,7 +301,10 @@ impl PveClient {
 
     pub async fn snapshot_rollback(&self, vmid: u32, name: &str) -> Result<(), String> {
         self.post(
-            &format!("/api2/json/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback", self.node),
+            &format!(
+                "/api2/json/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback",
+                self.node
+            ),
             json!({}),
             true,
         )
@@ -487,9 +507,7 @@ impl PveClient {
         if self.is_mock() {
             return self.mock(path).await;
         }
-        let mut rb = self
-            .http
-            .delete(&format!("{}{}", self.base, path));
+        let mut rb = self.http.delete(&format!("{}{}", self.base, path));
         if let Some(t) = &self.ticket {
             rb = rb.header("Cookie", format!("PVEAuthCookie={t}"));
         }
@@ -510,10 +528,7 @@ impl PveClient {
         if self.is_mock() {
             return self.mock(path).await;
         }
-        let mut rb = self
-            .http
-            .put(&format!("{}{}", self.base, path))
-            .json(&body);
+        let mut rb = self.http.put(&format!("{}{}", self.base, path)).json(&body);
         if let Some(t) = &self.ticket {
             rb = rb.header("Cookie", format!("PVEAuthCookie={t}"));
         }
@@ -559,7 +574,9 @@ impl PveClient {
             ]}));
         }
         if path.ends_with("/status") {
-            return Ok(json!({"data":{"cpu":0.42,"memory":21474836480_i64,"maxmem":42949672960_i64,"kversion":"7.0.2-6-pve","loadavg":["0.5","0.4","0.3"]}}));
+            return Ok(
+                json!({"data":{"cpu":0.42,"memory":21474836480_i64,"maxmem":42949672960_i64,"kversion":"7.0.2-6-pve","loadavg":["0.5","0.4","0.3"]}}),
+            );
         }
         if path.contains("/status/current") {
             return Ok(json!({"data":{"status":"running","cpu":0.32,"mem":2147483648_i64}}));
@@ -572,7 +589,8 @@ impl PveClient {
             let mut arr = Vec::new();
             for i in 0..60 {
                 let t = base - (59 - i) * 60;
-                let cpu = (0.3 + ((i as f64) * 0.25).sin() * 0.1 + ((i as f64) % 7.0) * 0.02).min(0.95);
+                let cpu =
+                    (0.3 + ((i as f64) * 0.25).sin() * 0.1 + ((i as f64) % 7.0) * 0.02).min(0.95);
                 let mem = 0.5 + ((i as f64) * 0.12).sin() * 0.04;
                 let mut p = json!({ "time": t, "cpu": cpu, "mem": mem * 21474836480.0 });
                 if path.contains("/qemu/") {
@@ -603,7 +621,9 @@ impl PveClient {
             let after = path.split("/qemu/").nth(1).unwrap_or("");
             if after.ends_with("/config") {
                 // memory 用字符串模拟真实 PVE 行为
-                return Ok(json!({"data":{"name":"Ubuntu 桌面","cores":4,"memory":"8192","vga":"virtio","virtio0":"local-lvm:vm-9000-disk-0,size=32G"}}));
+                return Ok(
+                    json!({"data":{"name":"Ubuntu 桌面","cores":4,"memory":"8192","vga":"virtio","virtio0":"local-lvm:vm-9000-disk-0,size=32G"}}),
+                );
             }
             if !after.contains('/') {
                 return Ok(json!({"data":[{"subdir":"config"},{"subdir":"status"}]}));
@@ -627,12 +647,16 @@ fn mode_label(vga: &str, has_hostpci: bool) -> String {
 
 /// 兼容数字或字符串的数字解析（PVE 部分字段返回字符串数字）。
 fn as_u64(v: &Value) -> Option<u64> {
-    v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
 async fn parse_resp(resp: reqwest::Response) -> Result<Value, String> {
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {e}"))?;
     if !status.is_success() {
         return Err(format!("PVE 返回 {status}: {text}"));
     }
@@ -674,7 +698,10 @@ mod tests {
     fn mode_label_three_modes() {
         assert_eq!(mode_label("std", false), "模式 1 · QMP 办公");
         assert_eq!(mode_label("virtio", false), "模式 2 · 像素流 60fps（V2.0）");
-        assert_eq!(mode_label("virtio-gl", false), "模式 2 · 像素流 60fps（V2.0）");
+        assert_eq!(
+            mode_label("virtio-gl", false),
+            "模式 2 · 像素流 60fps（V2.0）"
+        );
         assert_eq!(mode_label("qxl", true), "模式 3 · 直通满血（V3.0）");
         // 直通优先于 vga
         assert_eq!(mode_label("virtio", true), "模式 3 · 直通满血（V3.0）");

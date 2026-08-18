@@ -3,8 +3,8 @@
 //! 目标：在真实 PVE 宿主机（Weston Kiosk / Wayland）上跑通 HDMI 单应用渲染。
 //! 本里程碑使用 winit + softbuffer 直接渲染测试图案，不依赖桌面环境。
 
-mod environment;
 mod display_source;
+mod environment;
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -72,15 +72,21 @@ impl TerminalApp {
 
     fn draw(&mut self) {
         let Some(window) = &self.window else { return };
-        let Some(surface) = &mut self.surface else { return };
+        let Some(surface) = &mut self.surface else {
+            return;
+        };
 
         let size = window.inner_size();
         if size.width == 0 || size.height == 0 {
             return;
         }
 
-        let Some(w) = NonZeroU32::new(size.width) else { return };
-        let Some(h) = NonZeroU32::new(size.height) else { return };
+        let Some(w) = NonZeroU32::new(size.width) else {
+            return;
+        };
+        let Some(h) = NonZeroU32::new(size.height) else {
+            return;
+        };
         if surface.resize(w, h).is_err() {
             return;
         }
@@ -180,7 +186,9 @@ fn main() {
         Ok(report) => println!("[VirtConsole] {}", report.summary()),
         Err(message) => {
             eprintln!("[错误] {message}");
-            eprintln!("提示：如果是在开发机上调试，可设置环境变量 VIRTCONSOLE_MOCK=1 跳过硬件校验。");
+            eprintln!(
+                "提示：如果是在开发机上调试，可设置环境变量 VIRTCONSOLE_MOCK=1 跳过硬件校验。"
+            );
             std::process::exit(1);
         }
     }

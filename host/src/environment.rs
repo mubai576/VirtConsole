@@ -52,11 +52,9 @@ pub fn check() -> Result<Report, String> {
         .map(|v| !v.is_empty())
         .unwrap_or(false);
     if !has_wayland {
-        return Err(
-            "未检测到 Wayland 会话（WAYLAND_DISPLAY 未设置）。\n\
+        return Err("未检测到 Wayland 会话（WAYLAND_DISPLAY 未设置）。\n\
              请确认 Weston 已启动：systemctl status virtconsole-weston"
-                .to_string(),
-        );
+            .to_string());
     }
 
     // 2) 宿主机 GPU：/dev/dri 下是否有 card* / renderD*

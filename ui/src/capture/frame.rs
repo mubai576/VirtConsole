@@ -14,8 +14,8 @@
 
 use std::sync::Mutex as StdMutex;
 
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
@@ -45,7 +45,12 @@ impl DirtyState {
         match *self {
             DirtyState::Full => {}
             DirtyState::None => *self = DirtyState::Rect { x, y, w, h },
-            DirtyState::Rect { x: rx, y: ry, w: rw, h: rh } => {
+            DirtyState::Rect {
+                x: rx,
+                y: ry,
+                w: rw,
+                h: rh,
+            } => {
                 // 包围盒取两个矩形右下边界的较大者。曾经写成 rx.max(x + w)：
                 // 新矩形落在左上方时（rx=20,x=5）右边界被算成 20 而不是 25，
                 // 合并区右下角被切掉 → 画面残留旧像素。
@@ -53,7 +58,12 @@ impl DirtyState {
                 let ny = ry.min(y);
                 let nrw = (rx + rw).max(x + w) - nx;
                 let nrh = (ry + rh).max(y + h) - ny;
-                *self = DirtyState::Rect { x: nx, y: ny, w: nrw, h: nrh };
+                *self = DirtyState::Rect {
+                    x: nx,
+                    y: ny,
+                    w: nrw,
+                    h: nrh,
+                };
             }
         }
     }
@@ -69,7 +79,7 @@ pub fn xrgb_to_rgb(data: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8>
             // XRGB 内存序为 B,G,R,X
             out.push(row[o + 2]); // R
             out.push(row[o + 1]); // G
-            out.push(row[o]);     // B
+            out.push(row[o]); // B
         }
     }
     out
@@ -94,7 +104,7 @@ pub fn apply_update(
         let src_row = &data[dy * stride as usize..(dy + 1) * stride as usize];
         let dst_y = (y as usize + dy) * fw as usize;
         for dx in 0..w as usize {
-            let src = (dx * 4) as usize;
+            let src = dx * 4;
             let dst = (dst_y + x as usize + dx) * 3;
             frame.rgb[dst] = src_row[src + 2];
             frame.rgb[dst + 1] = src_row[src + 1];
@@ -103,26 +113,39 @@ pub fn apply_update(
     }
 }
 
-/// 从帧缓冲中截取局部区域的 RGB 数据（供差分推送）
-pub fn crop_rgb(f: &FrameBuf, x: i32, y: i32, w: i32, h: i32) -> Vec<u8> {
+/// 从帧缓冲中截取局部区域的 RGB 数据（供差分推送）。
+///
+/// 分辨率切换期间，Scanout 可能先替换帧，再由另一个回调留下旧尺寸的脏区。
+/// 这时不能按旧坐标切新帧；返回 None，让调用方退化为推送当前完整帧。
+pub fn crop_rgb(f: &FrameBuf, x: i32, y: i32, w: i32, h: i32) -> Option<Vec<u8>> {
     let fw = f.width as i32;
+    let fh = f.height as i32;
+    let right = x.checked_add(w)?;
+    let bottom = y.checked_add(h)?;
+    if x < 0 || y < 0 || w <= 0 || h <= 0 || right > fw || bottom > fh {
+        return None;
+    }
     let row_bytes = (w as usize) * 3;
     let mut out = Vec::with_capacity(row_bytes * h as usize);
     for dy in 0..h {
         let src_off = ((y + dy) * fw + x) as usize * 3;
         out.extend_from_slice(&f.rgb[src_off..src_off + row_bytes]);
     }
-    out
+    Some(out)
 }
 
 /// 若帧有更新则推送到前端（差分：全帧或局部脏区域，供采集循环周期调用）
-pub fn push_frame(app: &AppHandle, frame: &StdMutex<Option<FrameBuf>>, dirty: &StdMutex<DirtyState>) {
+pub fn push_frame(
+    app: &AppHandle,
+    frame: &StdMutex<Option<FrameBuf>>,
+    dirty: &StdMutex<DirtyState>,
+) -> Option<(usize, bool)> {
     let state = std::mem::replace(&mut *dirty.lock().unwrap(), DirtyState::None);
     if matches!(state, DirtyState::None) {
-        return;
+        return None;
     }
     let guard = frame.lock().unwrap();
-    let Some(f) = guard.as_ref() else { return };
+    let f = guard.as_ref()?;
 
     match state {
         DirtyState::Full => {
@@ -131,17 +154,32 @@ pub fn push_frame(app: &AppHandle, frame: &StdMutex<Option<FrameBuf>>, dirty: &S
                 "vm-frame",
                 json!({ "type": "full", "width": f.width, "height": f.height, "data": b64 }),
             );
+            Some((f.rgb.len(), true))
         }
         DirtyState::Rect { x, y, w, h } => {
-            // 裁剪脏区域 RGB，只推变化部分（大幅省带宽）
-            let rgb = crop_rgb(f, x, y, w, h);
-            let b64 = B64.encode(&rgb);
-            let _ = app.emit(
-                "vm-frame",
-                json!({ "type": "dirty", "x": x, "y": y, "width": w, "height": h, "data": b64 }),
-            );
+            if let Some(rgb) = crop_rgb(f, x, y, w, h) {
+                let raw_len = rgb.len();
+                // 裁剪脏区域 RGB，只推变化部分（大幅省带宽）
+                let b64 = B64.encode(&rgb);
+                let _ = app.emit(
+                    "vm-frame",
+                    json!({ "type": "dirty", "x": x, "y": y, "width": w, "height": h, "data": b64 }),
+                );
+                Some((raw_len, false))
+            } else {
+                eprintln!(
+                    "[capture] 丢弃跨分辨率脏区 ({x},{y},{w},{h})，改推当前全帧 {}x{}",
+                    f.width, f.height
+                );
+                let b64 = B64.encode(&f.rgb);
+                let _ = app.emit(
+                    "vm-frame",
+                    json!({ "type": "full", "width": f.width, "height": f.height, "data": b64 }),
+                );
+                Some((f.rgb.len(), true))
+            }
         }
-        DirtyState::None => {}
+        DirtyState::None => None,
     }
 }
 
@@ -150,7 +188,11 @@ mod tests {
     use super::*;
 
     fn buf(w: u32, h: u32) -> FrameBuf {
-        FrameBuf { width: w, height: h, rgb: vec![0u8; (w * h * 3) as usize] }
+        FrameBuf {
+            width: w,
+            height: h,
+            rgb: vec![0u8; (w * h * 3) as usize],
+        }
     }
 
     /// XRGB 的内存序是 B,G,R,X —— 顺序写反就是整屏红蓝互换，
@@ -178,14 +220,18 @@ mod tests {
         let out = xrgb_to_rgb(&data, 2, 2, 12);
         assert_eq!(out.len(), 2 * 2 * 3);
         assert_eq!(&out[0..3], &[255, 0, 0], "行 0 首像素应为红");
-        assert_eq!(&out[6..9], &[0, 255, 0], "行 1 首像素应为绿（按 stride 跳行）");
+        assert_eq!(
+            &out[6..9],
+            &[0, 255, 0],
+            "行 1 首像素应为绿（按 stride 跳行）"
+        );
     }
 
     #[test]
     fn apply_update_writes_only_the_rect() {
         let mut f = buf(4, 4);
         // 在 (1,1) 写 2x2 纯红
-        let patch: Vec<u8> = std::iter::repeat([0u8, 0, 255, 0]).take(4).flatten().collect();
+        let patch: Vec<u8> = std::iter::repeat_n([0u8, 0, 255, 0], 4).flatten().collect();
         apply_update(&mut f, 1, 1, 2, 2, 8, &patch);
         let px = |x: usize, y: usize| {
             let o = (y * 4 + x) * 3;
@@ -203,9 +249,9 @@ mod tests {
         let mut f = buf(4, 4);
         let before = f.rgb.clone();
         let patch = vec![255u8; 4 * 4 * 4];
-        apply_update(&mut f, 3, 3, 2, 2, 8, &patch);   // 右下越界
-        apply_update(&mut f, -1, 0, 2, 2, 8, &patch);  // 负坐标
-        apply_update(&mut f, 0, 0, 0, 2, 8, &patch);   // 零宽
+        apply_update(&mut f, 3, 3, 2, 2, 8, &patch); // 右下越界
+        apply_update(&mut f, -1, 0, 2, 2, 8, &patch); // 负坐标
+        apply_update(&mut f, 0, 0, 0, 2, 8, &patch); // 零宽
         assert_eq!(f.rgb, before, "越界更新应整体丢弃");
     }
 
@@ -214,13 +260,20 @@ mod tests {
         let mut f = buf(3, 3);
         // 把第 1 行（y=1）整行涂成 R=9
         for x in 0..3 {
-            f.rgb[(1 * 3 + x) * 3] = 9;
+            f.rgb[(3 + x) * 3] = 9;
         }
-        let out = crop_rgb(&f, 0, 1, 3, 1);
+        let out = crop_rgb(&f, 0, 1, 3, 1).expect("区域在帧内");
         assert_eq!(out.len(), 3 * 3);
         assert_eq!(out[0], 9);
         assert_eq!(out[3], 9);
         assert_eq!(out[6], 9);
+    }
+
+    #[test]
+    fn crop_rejects_dirty_rect_from_previous_resolution() {
+        let f = buf(1600, 900);
+        assert!(crop_rgb(&f, 0, 880, 2560, 20).is_none());
+        assert!(crop_rgb(&f, -1, 0, 1, 1).is_none());
     }
 
     /// 脏区合并必须取并集外接矩形：取交集或直接覆盖都会漏推像素，
@@ -228,8 +281,8 @@ mod tests {
     #[test]
     fn dirty_rect_merge_takes_bounding_box() {
         let mut d = DirtyState::None;
-        d.merge_rect(10, 10, 5, 5);   // (10,10)-(15,15)
-        d.merge_rect(20, 20, 5, 5);   // (20,20)-(25,25)
+        d.merge_rect(10, 10, 5, 5); // (10,10)-(15,15)
+        d.merge_rect(20, 20, 5, 5); // (20,20)-(25,25)
         match d {
             DirtyState::Rect { x, y, w, h } => {
                 assert_eq!((x, y), (10, 10));
@@ -250,7 +303,7 @@ mod tests {
     fn dirty_merge_handles_rect_extending_backwards() {
         let mut d = DirtyState::None;
         d.merge_rect(20, 20, 5, 5);
-        d.merge_rect(5, 5, 2, 2);   // 新矩形在左上方
+        d.merge_rect(5, 5, 2, 2); // 新矩形在左上方
         match d {
             DirtyState::Rect { x, y, w, h } => {
                 assert_eq!((x, y), (5, 5), "起点应回退到更小的坐标");

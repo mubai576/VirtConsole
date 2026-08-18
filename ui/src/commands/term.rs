@@ -18,10 +18,7 @@ pub async fn term_stop(state: tauri::State<'_, TermState>) -> Result<(), String>
 }
 
 #[tauri::command]
-pub async fn term_input(
-    state: tauri::State<'_, TermState>,
-    data: String,
-) -> Result<(), String> {
+pub async fn term_input(state: tauri::State<'_, TermState>, data: String) -> Result<(), String> {
     crate::terminal::input(&state, data).await
 }
 

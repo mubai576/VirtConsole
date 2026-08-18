@@ -14,7 +14,7 @@
 //! 参考：QEMU `docs/interop/dbus-display.html` + `tests/qtest/dbus-display-test.c`。
 
 use std::os::fd::FromRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tauri::AppHandle;
@@ -25,7 +25,11 @@ use zbus::{proxy, Connection};
 use super::frame::{apply_update, push_frame, xrgb_to_rgb, DirtyState, FrameBuf};
 
 /// org.qemu.Display1.VM 代理
-#[proxy(interface = "org.qemu.Display1.VM", default_service = "org.qemu", default_path = "/org/qemu/Display1/VM")]
+#[proxy(
+    interface = "org.qemu.Display1.VM",
+    default_service = "org.qemu",
+    default_path = "/org/qemu/Display1/VM"
+)]
 trait QemuVm {
     #[zbus(property)]
     fn name(&self) -> zbus::Result<String>;
@@ -46,11 +50,23 @@ struct ScanoutListener {
     frame: Arc<StdMutex<Option<FrameBuf>>>,
     /// 脏区域（合并高帧率局部更新；None=无更新，Some(全帧)=整帧，Some(rect)=局部）
     dirty: Arc<StdMutex<DirtyState>>,
+    scanouts: Arc<AtomicU64>,
+    updates: Arc<AtomicU64>,
 }
 
 impl ScanoutListener {
-    fn new(frame: Arc<StdMutex<Option<FrameBuf>>>, dirty: Arc<StdMutex<DirtyState>>) -> Self {
-        Self { frame, dirty }
+    fn new(
+        frame: Arc<StdMutex<Option<FrameBuf>>>,
+        dirty: Arc<StdMutex<DirtyState>>,
+        scanouts: Arc<AtomicU64>,
+        updates: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            frame,
+            dirty,
+            scanouts,
+            updates,
+        }
     }
 }
 
@@ -65,13 +81,10 @@ impl ScanoutListener {
         _pixman_format: u32,
         data: Vec<u8>,
     ) -> zbus::fdo::Result<()> {
+        self.scanouts.fetch_add(1, Ordering::Relaxed);
         eprintln!("[capture] Scanout {}x{} stride={}", width, height, stride);
         let rgb = xrgb_to_rgb(&data, width, height, stride);
-        *self.frame.lock().unwrap() = Some(FrameBuf {
-            width,
-            height,
-            rgb,
-        });
+        *self.frame.lock().unwrap() = Some(FrameBuf { width, height, rgb });
         *self.dirty.lock().unwrap() = DirtyState::Full;
         Ok(())
     }
@@ -88,6 +101,7 @@ impl ScanoutListener {
         _pixman_format: u32,
         data: Vec<u8>,
     ) -> zbus::fdo::Result<()> {
+        self.updates.fetch_add(1, Ordering::Relaxed);
         let mut guard = self.frame.lock().unwrap();
         if let Some(f) = guard.as_mut() {
             apply_update(f, x, y, width, height, stride, &data);
@@ -210,7 +224,11 @@ impl CaptureState {
 
 /// 启动 dbus-display 采集。
 /// bus_addr：None 用 session bus，Some 用自定义地址（QEMU -display dbus,addr= 同款）。
-pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String>) -> Result<String, String> {
+pub async fn start(
+    app: AppHandle,
+    state: &CaptureState,
+    bus_addr: Option<String>,
+) -> Result<String, String> {
     eprintln!("[capture] capture_start 被调用（bus_addr={bus_addr:?}）");
     stop(state).await;
 
@@ -225,7 +243,9 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
     eprintln!("[capture] 已连接 D-Bus");
 
     // 发现 VM + Console
-    let vm = QemuVmProxy::new(&bus).await.map_err(|e| format!("D-Bus VM 对象不可达（VM 是否以 -display dbus 启动？）: {e}"))?;
+    let vm = QemuVmProxy::new(&bus)
+        .await
+        .map_err(|e| format!("D-Bus VM 对象不可达（VM 是否以 -display dbus 启动？）: {e}"))?;
     eprintln!("[capture] VM 代理已建立");
     let console_ids = match vm.console_ids().await {
         Ok(ids) => {
@@ -255,7 +275,10 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
     // socketpair：一端交 QEMU，一端本地 p2p
     let mut pair = [0; 2];
     if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, pair.as_mut_ptr()) } != 0 {
-        return Err(format!("socketpair 失败: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "socketpair 失败: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     let (qemu_fd, our_fd) = (pair[0], pair[1]);
     let qemu_fd_owned = OwnedFd::from(unsafe { std::os::fd::OwnedFd::from_raw_fd(qemu_fd) });
@@ -279,10 +302,21 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
         .build()
         .await
         .map_err(|e| e.to_string())?;
-    eprintln!("[capture] p2p connection OK, unique={:?}", lconn.unique_name());
+    eprintln!(
+        "[capture] p2p connection OK, unique={:?}",
+        lconn.unique_name()
+    );
 
-    let listener = ScanoutListener::new(state.frame.clone(), state.dirty.clone());
-    lconn.object_server()
+    let scanouts = Arc::new(AtomicU64::new(0));
+    let updates = Arc::new(AtomicU64::new(0));
+    let listener = ScanoutListener::new(
+        state.frame.clone(),
+        state.dirty.clone(),
+        scanouts.clone(),
+        updates.clone(),
+    );
+    lconn
+        .object_server()
         .at("/org/qemu/Display1/Listener", listener)
         .await
         .map_err(|e| e.to_string())?;
@@ -296,7 +330,13 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
         use futures_util::StreamExt;
         // 持续 poll zbus 消息（驱动 p2p 连接把方法调用派发到 Listener 接口）
         let mut msgs = zbus::MessageStream::from(&lconn);
-        let mut tick = tokio::time::interval(std::time::Duration::from_millis(33));
+        // dbus-display 按事件推送，应用侧只负责合并脏区并以接近 60fps 的
+        // 节奏交给 Canvas；无更新时仍不会产生 IPC。
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(16));
+        let mut stats_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut pushed = 0u64;
+        let mut pushed_full = 0u64;
+        let mut pushed_bytes = 0usize;
         loop {
             if !on_flag.load(Ordering::Relaxed) {
                 break;
@@ -306,9 +346,23 @@ pub async fn start(app: AppHandle, state: &CaptureState, bus_addr: Option<String
                 _ = msgs.next() => {}
                 _ = tick.tick() => {
                     // 周期合并推送帧（无更新时零开销）
-                    if !matches!(*task_dirty.lock().unwrap(), DirtyState::None) {
-                        push_frame(&task_app, &task_frame, &task_dirty);
+                    if let Some((raw_bytes, full)) = push_frame(&task_app, &task_frame, &task_dirty) {
+                        pushed += 1;
+                        pushed_full += u64::from(full);
+                        pushed_bytes += raw_bytes;
                     }
+                }
+                _ = stats_tick.tick() => {
+                    let scanout_count = scanouts.swap(0, Ordering::Relaxed);
+                    let update_count = updates.swap(0, Ordering::Relaxed);
+                    eprintln!(
+                        "[capture] stats: scanout={scanout_count}/s update={update_count}/s \
+                         push={pushed}/s full={pushed_full}/s raw={:.1}MiB/s",
+                        pushed_bytes as f64 / (1024.0 * 1024.0)
+                    );
+                    pushed = 0;
+                    pushed_full = 0;
+                    pushed_bytes = 0;
                 }
             }
         }

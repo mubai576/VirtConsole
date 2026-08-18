@@ -52,9 +52,13 @@ pub async fn pve_connect(
 }
 
 #[tauri::command]
-pub async fn pve_entities(state: tauri::State<'_, PveState>) -> Result<Vec<crate::pve::Entity>, String> {
+pub async fn pve_entities(
+    state: tauri::State<'_, PveState>,
+) -> Result<Vec<crate::pve::Entity>, String> {
     let mut guard = state.client.lock().await;
-    let cli = guard.as_mut().ok_or("未连接 PVE（请到 设置 → PVE 连接 配置）")?;
+    let cli = guard
+        .as_mut()
+        .ok_or("未连接 PVE（请到 设置 → PVE 连接 配置）")?;
     cli.list_entities().await
 }
 
@@ -145,7 +149,9 @@ pub async fn pve_vm_disable_dbus(
 // ===== 监控 =====
 
 #[tauri::command]
-pub async fn pve_host_live(state: tauri::State<'_, PveState>) -> Result<crate::pve::HostLive, String> {
+pub async fn pve_host_live(
+    state: tauri::State<'_, PveState>,
+) -> Result<crate::pve::HostLive, String> {
     let mut guard = state.client.lock().await;
     let cli = guard.as_mut().ok_or("未连接 PVE")?;
     cli.host_live().await

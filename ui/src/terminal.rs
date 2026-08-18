@@ -3,8 +3,8 @@
 //! V1.0 仅宿主机 shell（PRD 2.1.2）；VM 串口待 V2.0+。
 //! 传输：stdout 字节经 tauri 事件推送（UTF-8，跨 chunk 完整），前端 xterm.js 写入；stdin 经 IPC 反向。
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter};

@@ -3,16 +3,16 @@
 //! 重要约束：QEMU 的 QMP socket 同一时刻只允许一个客户端连接，
 //! 因此采集与输入共用同一条连接（tokio::Mutex 串行化命令，避免响应错配）。
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 use qmp_engine::QmpClient;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 
 pub struct QmpState {
     pub client: Arc<Mutex<Option<QmpClient>>>,
@@ -45,7 +45,9 @@ pub async fn connect(app: AppHandle, state: &QmpState, vmid: u32) -> Result<Stri
     }
 
     let socket = format!("/var/run/qemu-server/{vmid}.qmp");
-    let qmp = QmpClient::connect(&socket).await.map_err(|e| e.to_string())?;
+    let qmp = QmpClient::connect(&socket)
+        .await
+        .map_err(|e| e.to_string())?;
 
     *state.client.lock().await = Some(qmp);
     *state.vmid.lock().await = Some(vmid);
@@ -56,14 +58,20 @@ pub async fn connect(app: AppHandle, state: &QmpState, vmid: u32) -> Result<Stri
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_focus();
     }
-    let fps = capture_fps(&app);
-    let task = tokio::spawn(capture_loop(
-        app.clone(),
-        state.client.clone(),
-        state.capture_on.clone(),
-        fps,
-    ));
-    *state.capture_task.lock().await = Some(task);
+    if should_start_capture(&app) {
+        let fps = capture_fps(&app);
+        let task = tokio::spawn(capture_loop(
+            app.clone(),
+            state.client.clone(),
+            state.capture_on.clone(),
+            fps,
+        ));
+        *state.capture_task.lock().await = Some(task);
+    } else {
+        // 模式 2 已由 dbus-display 推帧。QMP 连接仍保留给输入回退，
+        // 但不能再开 screendump，否则两条链路会向同一 vm-frame 事件重复发画面。
+        eprintln!("[QMP] dbus-display 已启用，跳过 QMP 画面采集");
+    }
 
     emit_status(&app, "connected", &format!("VM {vmid} 已连接"));
     Ok(format!("已连接 VM {vmid}"))
@@ -72,6 +80,19 @@ pub async fn connect(app: AppHandle, state: &QmpState, vmid: u32) -> Result<Stri
 /// 采集帧率：读 config.capture_fps（1..30）
 fn capture_fps(app: &AppHandle) -> u32 {
     crate::config::load(app).capture_fps.clamp(1, 30)
+}
+
+fn should_start_capture(app: &AppHandle) -> bool {
+    #[cfg(unix)]
+    {
+        app.try_state::<crate::capture::CaptureState>()
+            .is_none_or(|state| !state.is_on())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = app;
+        true
+    }
 }
 
 pub async fn disconnect(state: &QmpState) {
@@ -91,7 +112,10 @@ pub async fn input_key(state: &QmpState, key: String, down: bool) -> Result<(), 
         .send_key(&key, down)
         .await
         .map_err(|e| e.to_string());
-    eprintln!("[QMP] key={key} down={down} -> {:?}", res.as_ref().map(|_| "ok"));
+    eprintln!(
+        "[QMP] key={key} down={down} -> {:?}",
+        res.as_ref().map(|_| "ok")
+    );
     res
 }
 

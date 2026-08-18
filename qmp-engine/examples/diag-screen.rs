@@ -18,7 +18,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let b = shot(&mut qmp, "/tmp/diag-2.ppm").await?;
     println!("无输入 2s 两帧相同: {}", a == b);
     // 发多个 Enter，等 1s 再截
-    for _ in 0..3 { qmp.tap_key("ret").await?; }
+    for _ in 0..3 {
+        qmp.tap_key("ret").await?;
+    }
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     let c = shot(&mut qmp, "/tmp/diag-3.ppm").await?;
     println!("发送 3 次 Enter 后画面变化: {}", b != c);
@@ -33,8 +35,12 @@ async fn run() -> Result<(), Box<dyn Error>> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(unix)]
-    { run().await?; }
+    {
+        run().await?;
+    }
     #[cfg(not(unix))]
-    { println!("仅 Linux"); }
+    {
+        println!("仅 Linux");
+    }
     Ok(())
 }

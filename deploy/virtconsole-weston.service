@@ -11,6 +11,9 @@ SupplementaryGroups=video render input tty
 Environment=XDG_RUNTIME_DIR=/run/virtconsole
 RuntimeDirectory=virtconsole
 RuntimeDirectoryMode=0700
+# 共享 D-Bus socket 也位于 /run/virtconsole。切换输出模式需要重启 Weston，
+# 保留目录可避免 systemd 删除仍由 virtconsole-dbus 使用的 socket。
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/bin/weston --backend=drm-backend.so --shell=kiosk-shell.so --socket=wayland-0
 Restart=on-failure
 RestartSec=3

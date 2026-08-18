@@ -9,9 +9,7 @@ use qmp_engine::QmpClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args()
-        .nth(1)
-        .ok_or("用法: probe <qmp-socket>")?;
+    let path = std::env::args().nth(1).ok_or("用法: probe <qmp-socket>")?;
     let execute = std::env::args().nth(2);
     let args_json = std::env::args().nth(3);
 
@@ -19,10 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let mut qmp = QmpClient::connect(&path).await?;
         if let Some(cmd) = execute {
-            let args = args_json
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()?;
+            let args = args_json.as_deref().map(serde_json::from_str).transpose()?;
             let resp = qmp.command(&cmd, args).await?;
             println!("{cmd} => {resp}");
         } else {

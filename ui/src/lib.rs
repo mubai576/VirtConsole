@@ -53,7 +53,9 @@ fn manage_capture<R: tauri::Runtime>(b: tauri::Builder<R>) -> tauri::Builder<R> 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    use commands::{app, browser as bcmd, capture as ccmd, config as cfgcmd, pve as pcmd, term, vm};
+    use commands::{
+        app, browser as bcmd, capture as ccmd, config as cfgcmd, pve as pcmd, term, vm,
+    };
 
     let builder = tauri::Builder::default()
         .manage(QmpState::default())

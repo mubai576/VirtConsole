@@ -26,10 +26,7 @@ pub async fn vm_input_key(
 }
 
 #[tauri::command]
-pub async fn vm_input_text(
-    state: tauri::State<'_, QmpState>,
-    text: String,
-) -> Result<(), String> {
+pub async fn vm_input_text(state: tauri::State<'_, QmpState>, text: String) -> Result<(), String> {
     crate::qmp::input_text(&state, text).await
 }
 
