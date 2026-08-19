@@ -26,6 +26,8 @@ pub mod keymap;
 #[cfg(unix)]
 pub mod dbus_input;
 #[cfg(unix)]
+pub mod overlay;
+#[cfg(unix)]
 pub mod session;
 
 // 对外沿用扁平路径：lib.rs / input.rs 里的 `capture::input_key`、`capture::start`

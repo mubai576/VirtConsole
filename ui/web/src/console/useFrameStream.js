@@ -74,6 +74,7 @@ export function useFrameStream(canvasRef) {
   useEffect(() => {
     target = canvasRef.current;
     let un = null;
+    let unSize = null;
     let pendingFull = null;
     let pendingDirty = [];
     let scheduled = false;
@@ -136,9 +137,24 @@ export function useFrameStream(canvasRef) {
       }
       schedule();
     }).then((fn) => { un = fn; });
+    listen("vm-display-size", (ev) => {
+      const width = Number(ev.payload?.width);
+      const height = Number(ev.payload?.height);
+      if (!target || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return;
+      // Native overlays carry no vm-frame pixels, but pointer mapping still
+      // uses the canvas intrinsic size as the guest coordinate system.
+      target.width = width;
+      target.height = height;
+      window.__vcDebug = {
+        ...(window.__vcDebug || {}),
+        frameWidth: width,
+        frameHeight: height,
+      };
+    }).then((fn) => { unSize = fn; });
 
     return () => {
       if (un) un();
+      if (unSize) unSize();
       pendingFull = null;
       pendingDirty = [];
     };

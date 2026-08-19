@@ -95,6 +95,11 @@ pub async fn capture_mouse_move(
     x: u32,
     y: u32,
 ) -> Result<(), String> {
+    // input-linux reads relative events directly from the host evdev device.
+    // Do not inject a second absolute pointer stream into the guest.
+    if std::env::var("VIRTCONSOLE_HID_MOUSE").as_deref() == Ok("1") {
+        return Ok(());
+    }
     crate::capture::mouse_move(&state, x, y).await
 }
 
@@ -105,6 +110,10 @@ pub async fn capture_mouse_button(
     button: u32,
     down: bool,
 ) -> Result<(), String> {
+    // Buttons and wheels are part of the same evdev stream in HID mode.
+    if std::env::var("VIRTCONSOLE_HID_MOUSE").as_deref() == Ok("1") {
+        return Ok(());
+    }
     crate::capture::mouse_button(&state, button, down).await
 }
 

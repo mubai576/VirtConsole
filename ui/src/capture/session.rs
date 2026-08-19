@@ -13,16 +13,19 @@
 //!
 //! 参考：QEMU `docs/interop/dbus-display.html` + `tests/qtest/dbus-display-test.c`。
 
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use zbus::zvariant::OwnedFd;
 use zbus::{proxy, Connection};
 
 use super::frame::{apply_update, push_frame, xrgb_to_rgb, DirtyState, FrameBuf};
+use super::overlay::{DmabufFrame, NativeOverlay, OverlayFrame, WaylandDmabufOverlay};
+
+const MAP_INTERFACE: &str = "org.qemu.Display1.Listener.Unix.Map";
 
 /// org.qemu.Display1.VM 代理
 #[proxy(
@@ -47,25 +50,43 @@ trait QemuConsole {
 
 /// Listener 接口实现：接收画面事件并更新帧缓冲（推送由采集循环周期执行）。
 struct ScanoutListener {
+    app: AppHandle,
     frame: Arc<StdMutex<Option<FrameBuf>>>,
     /// 脏区域（合并高帧率局部更新；None=无更新，Some(全帧)=整帧，Some(rect)=局部）
     dirty: Arc<StdMutex<DirtyState>>,
     scanouts: Arc<AtomicU64>,
     updates: Arc<AtomicU64>,
+    map_mode: bool,
+    dmabuf_overlay: Option<WaylandDmabufOverlay>,
+    dmabuf_ready: Arc<StdMutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>>,
 }
 
 impl ScanoutListener {
     fn new(
+        app: AppHandle,
         frame: Arc<StdMutex<Option<FrameBuf>>>,
         dirty: Arc<StdMutex<DirtyState>>,
         scanouts: Arc<AtomicU64>,
         updates: Arc<AtomicU64>,
+        map_mode: bool,
+        dmabuf_overlay: Option<WaylandDmabufOverlay>,
+        dmabuf_ready: Arc<StdMutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>>,
     ) -> Self {
         Self {
+            app,
             frame,
             dirty,
             scanouts,
             updates,
+            map_mode,
+            dmabuf_overlay,
+            dmabuf_ready,
+        }
+    }
+
+    fn signal_dmabuf_ready(&self, result: Result<(), String>) {
+        if let Some(sender) = self.dmabuf_ready.lock().unwrap().take() {
+            let _ = sender.send(result);
         }
     }
 }
@@ -81,6 +102,11 @@ impl ScanoutListener {
         _pixman_format: u32,
         data: Vec<u8>,
     ) -> zbus::fdo::Result<()> {
+        if self.dmabuf_overlay.is_some() {
+            let message = "DMABUF Wayland mode received a pixel Scanout instead of ScanoutDMABUF";
+            self.signal_dmabuf_ready(Err(message.into()));
+            return Err(zbus::fdo::Error::Failed(message.into()));
+        }
         self.scanouts.fetch_add(1, Ordering::Relaxed);
         eprintln!("[capture] Scanout {}x{} stride={}", width, height, stride);
         let rgb = xrgb_to_rgb(&data, width, height, stride);
@@ -113,40 +139,79 @@ impl ScanoutListener {
         Ok(())
     }
 
-    /// ScanoutDMABUF：gl=on 主链路（NVIDIA 私有 modifier 不可外部导入，忽略内容仅记录）
+    /// ScanoutDMABUF：gl=on 时把 fd 直接提交给 Weston，不经过 EGL 或 Canvas。
     #[zbus(name = "ScanoutDMABUF")]
     async fn scanout_dmabuf(
         &mut self,
-        _dmabuf: OwnedFd,
+        dmabuf: OwnedFd,
         width: u32,
         height: u32,
         stride: u32,
         fourcc: u32,
-        _modifier: u64,
-        _y0_top: bool,
+        modifier: u64,
+        y0_top: bool,
     ) -> zbus::fdo::Result<()> {
+        let Some(overlay) = self.dmabuf_overlay.clone() else {
+            eprintln!(
+                "[capture] ScanoutDMABUF {}x{} stride={} fourcc=0x{fourcc:08X} ignored (Wayland mode disabled)",
+                width, height, stride
+            );
+            return Ok(());
+        };
+        self.scanouts.fetch_add(1, Ordering::Relaxed);
         eprintln!(
-            "[capture] ScanoutDMABUF {}x{} stride={} fourcc=0x{fourcc:08X}（NVIDIA modifier 需内部渲染，忽略）",
-            width, height, stride
+            "[capture] ScanoutDMABUF {}x{} stride={} fourcc=0x{fourcc:08X} modifier=0x{modifier:016X} y0_top={y0_top}",
+            width, height, stride,
         );
-        Ok(())
+        let fd: std::os::fd::OwnedFd = dmabuf.into();
+        let result = overlay
+            .present(DmabufFrame {
+                fd,
+                width,
+                height,
+                stride,
+                fourcc,
+                modifier,
+                y0_top,
+            })
+            .await;
+        let result = result.and_then(|()| {
+            self.app
+                .emit(
+                    "vm-display-size",
+                    serde_json::json!({ "width": width, "height": height }),
+                )
+                .map_err(|error| format!("emit DMABUF display size: {error}"))
+        });
+        self.signal_dmabuf_ready(result.clone());
+        result.map_err(zbus::fdo::Error::Failed)
     }
 
-    /// UpdateDMABUF：忽略
+    /// UpdateDMABUF：重新提交同一个 wl_buffer，并把 QEMU 脏区转交 Weston。
     #[zbus(name = "UpdateDMABUF")]
     async fn update_dmabuf(
         &mut self,
-        _x: i32,
-        _y: i32,
-        _width: i32,
-        _height: i32,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
     ) -> zbus::fdo::Result<()> {
+        if let Some(overlay) = &self.dmabuf_overlay {
+            self.updates.fetch_add(1, Ordering::Relaxed);
+            overlay.damage(x, y, width, height);
+        }
         Ok(())
     }
 
     /// Disable：清空画面
     async fn disable(&mut self) -> zbus::fdo::Result<()> {
         eprintln!("[capture] Disable");
+        if let Some(overlay) = &self.dmabuf_overlay {
+            overlay.hide();
+            self.signal_dmabuf_ready(Err(
+                "QEMU disabled the display before the first DMABUF".into()
+            ));
+        }
         *self.frame.lock().unwrap() = None;
         *self.dirty.lock().unwrap() = DirtyState::Full;
         Ok(())
@@ -167,19 +232,208 @@ impl ScanoutListener {
         Ok(())
     }
 
-    /// 故意返回空：**不**声明 `org.qemu.Display1.Listener.Unix.Map`。
-    ///
-    /// `Scanout`/`Update` 是基础接口，无需声明即可收到，当前 85fps 够用。
-    /// 声明 Unix.Map 会让 QEMU 改走 `ScanoutMap` 递 fd，但本 Listener 没实现
-    /// `scanout_map` 方法——声明了却不实现会让画面直接断掉。
-    ///
-    /// 想启用共享内存零拷贝，顺序是：先拿 `spike-dbus` 在 **gl=off** 下实测
-    /// QEMU 是否真的发 `ScanoutMap`（M2.5 的 C3 只在 gl=on 下收到
-    /// `Scanout`/`ScanoutDMABUF`，**没收到 ScanoutMap**，见 90-历史记录.md），
-    /// 确认发了再把 spike 的实现搬进来、同时改这里。别只改这一行。
+    /// Map 模式通过同路径上的独立 Unix.Map 接口提供 ScanoutMap/UpdateMap。
     #[zbus(property, name = "Interfaces")]
     fn interfaces(&self) -> Vec<String> {
-        vec![]
+        if self.map_mode {
+            vec![MAP_INTERFACE.to_owned()]
+        } else {
+            vec![]
+        }
+    }
+}
+
+struct MappedFrame {
+    _handle: OwnedFd,
+    mapped_addr: usize,
+    map_len: usize,
+    data_offset: usize,
+    width: usize,
+    height: usize,
+    stride: usize,
+    frame_bytes: usize,
+}
+
+impl Drop for MappedFrame {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.mapped_addr as *mut libc::c_void, self.map_len);
+        }
+    }
+}
+
+impl MappedFrame {
+    fn map(
+        handle: OwnedFd,
+        offset: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixman_format: u32,
+    ) -> Result<Self, String> {
+        if width == 0 || height == 0 || u64::from(stride) < u64::from(width) * 4 {
+            return Err("invalid Map dimensions or stride".into());
+        }
+        if (pixman_format >> 24) != 0x20 || (pixman_format & 0x0fff) != 0x888 {
+            return Err(format!("unsupported pixman format 0x{pixman_format:08X}"));
+        }
+        let frame_bytes = u64::from(stride)
+            .checked_mul(u64::from(height))
+            .ok_or_else(|| "Map frame size overflow".to_string())?;
+        let end = u64::from(offset)
+            .checked_add(frame_bytes)
+            .ok_or_else(|| "Map offset overflow".to_string())?;
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if unsafe { libc::fstat(handle.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let fd_len = u64::try_from(unsafe { stat.assume_init() }.st_size)
+            .map_err(|_| "Map fd has negative size".to_string())?;
+        if end > fd_len {
+            return Err(format!("Map end {end} exceeds fd size {fd_len}"));
+        }
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if page <= 0 {
+            return Err("failed to query page size".into());
+        }
+        let page = page as u64;
+        let aligned = u64::from(offset) / page * page;
+        let delta = u64::from(offset) - aligned;
+        let map_len = usize::try_from(delta + frame_bytes)
+            .map_err(|_| "Map length overflows usize".to_string())?;
+        let ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                map_len,
+                libc::PROT_READ,
+                libc::MAP_PRIVATE,
+                handle.as_raw_fd(),
+                aligned as libc::off_t,
+            )
+        };
+        if ptr == libc::MAP_FAILED {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(Self {
+            _handle: handle,
+            mapped_addr: ptr as usize,
+            map_len,
+            data_offset: delta as usize,
+            width: width as usize,
+            height: height as usize,
+            stride: stride as usize,
+            frame_bytes: frame_bytes as usize,
+        })
+    }
+
+    fn copy_rect(&self, frame: &mut FrameBuf, x: i32, y: i32, width: i32, height: i32) {
+        let x0 = x.max(0) as usize;
+        let y0 = y.max(0) as usize;
+        let x1 = (x + width).max(0) as usize;
+        let y1 = (y + height).max(0) as usize;
+        let x1 = x1.min(self.width).min(frame.width as usize);
+        let y1 = y1.min(self.height).min(frame.height as usize);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let src = unsafe {
+            std::slice::from_raw_parts(
+                (self.mapped_addr as *const u8).add(self.data_offset),
+                self.frame_bytes,
+            )
+        };
+        for row in y0..y1 {
+            let src_row = row * self.stride + x0 * 4;
+            let dst_row = (row * frame.width as usize + x0) * 3;
+            for col in x0..x1 {
+                let s = src_row + (col - x0) * 4;
+                let d = dst_row + (col - x0) * 3;
+                frame.rgb[d] = src[s + 2];
+                frame.rgb[d + 1] = src[s + 1];
+                frame.rgb[d + 2] = src[s];
+            }
+        }
+    }
+
+    fn copy_full(&self, frame: &mut FrameBuf) {
+        self.copy_rect(frame, 0, 0, self.width as i32, self.height as i32);
+    }
+}
+
+struct MapListener {
+    frame: Arc<StdMutex<Option<FrameBuf>>>,
+    dirty: Arc<StdMutex<DirtyState>>,
+    overlay_frame: Arc<StdMutex<OverlayFrame>>,
+    overlay: NativeOverlay,
+    scanouts: Arc<AtomicU64>,
+    updates: Arc<AtomicU64>,
+    current: Option<MappedFrame>,
+}
+
+impl MapListener {
+    fn publish(&self) {
+        let guard = self.frame.lock().unwrap();
+        let Some(frame) = guard.as_ref() else {
+            return;
+        };
+        let mut target = self.overlay_frame.lock().unwrap();
+        target.width = frame.width;
+        target.height = frame.height;
+        target.pixels.clone_from(&frame.rgb);
+        drop(guard);
+    }
+}
+
+#[zbus::interface(name = "org.qemu.Display1.Listener.Unix.Map")]
+impl MapListener {
+    async fn scanout_map(
+        &mut self,
+        handle: OwnedFd,
+        offset: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixman_format: u32,
+    ) -> zbus::fdo::Result<()> {
+        eprintln!(
+            "[capture] ScanoutMap {}x{} offset={} stride={} pixman=0x{pixman_format:08X}",
+            width, height, offset, stride
+        );
+        let mapped = MappedFrame::map(handle, offset, width, height, stride, pixman_format)
+            .map_err(zbus::fdo::Error::Failed)?;
+        self.current = Some(mapped);
+        let current = self.current.as_ref().unwrap();
+        let mut frame = FrameBuf {
+            width,
+            height,
+            rgb: vec![0; width as usize * height as usize * 3],
+        };
+        current.copy_full(&mut frame);
+        *self.frame.lock().unwrap() = Some(frame);
+        *self.dirty.lock().unwrap() = DirtyState::Full;
+        self.scanouts.fetch_add(1, Ordering::Relaxed);
+        self.publish();
+        self.overlay.draw();
+        Ok(())
+    }
+
+    async fn update_map(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> zbus::fdo::Result<()> {
+        if let Some(current) = &self.current {
+            if let Some(frame) = self.frame.lock().unwrap().as_mut() {
+                current.copy_rect(frame, x, y, width, height);
+            }
+            self.dirty.lock().unwrap().merge_rect(x, y, width, height);
+            self.updates.fetch_add(1, Ordering::Relaxed);
+            self.publish();
+            self.overlay.draw();
+        }
+        Ok(())
     }
 }
 
@@ -195,6 +449,8 @@ pub struct CaptureState {
     pub(super) input_bus: Arc<StdMutex<Option<zbus::Connection>>>,
     /// 当前 Console 路径（如 /org/qemu/Display1/Console_0）
     pub(super) console_path: Arc<StdMutex<Option<String>>>,
+    pub(super) overlay: Arc<StdMutex<Option<NativeOverlay>>>,
+    dmabuf_overlay: Arc<StdMutex<Option<WaylandDmabufOverlay>>>,
 }
 
 impl Default for CaptureState {
@@ -206,6 +462,8 @@ impl Default for CaptureState {
             dirty: Arc::new(StdMutex::new(DirtyState::None)),
             input_bus: Arc::new(StdMutex::new(None)),
             console_path: Arc::new(StdMutex::new(None)),
+            overlay: Arc::new(StdMutex::new(None)),
+            dmabuf_overlay: Arc::new(StdMutex::new(None)),
         }
     }
 }
@@ -231,6 +489,52 @@ pub async fn start(
 ) -> Result<String, String> {
     eprintln!("[capture] capture_start 被调用（bus_addr={bus_addr:?}）");
     stop(state).await;
+    // Keep the old EGL experiment switch as an explicit failure. The working
+    // path is a separate Wayland import mode so existing deployments cannot
+    // silently change behavior.
+    if std::env::var("VIRTCONSOLE_DMABUF").as_deref() == Ok("1") {
+        return Err(
+            "VIRTCONSOLE_DMABUF is the failed EGL experiment; use VIRTCONSOLE_DMABUF_WAYLAND=1 for direct Weston import"
+                .into(),
+        );
+    }
+    let map_mode = std::env::var("VIRTCONSOLE_SCANOUT_MAP").as_deref() == Ok("1");
+    let dmabuf_mode = std::env::var("VIRTCONSOLE_DMABUF_WAYLAND").as_deref() == Ok("1");
+    if map_mode && dmabuf_mode {
+        return Err(
+            "VIRTCONSOLE_SCANOUT_MAP and VIRTCONSOLE_DMABUF_WAYLAND are mutually exclusive".into(),
+        );
+    }
+    let overlay_frame = if map_mode {
+        let mut overlay = state.overlay.lock().unwrap();
+        if overlay.is_none() {
+            *overlay = Some(
+                super::overlay::create(&app)
+                    .map_err(|e| format!("创建 native capture overlay 失败: {e}"))?,
+            );
+        }
+        let native = overlay.as_ref().unwrap();
+        native.show();
+        Some(native.frame())
+    } else {
+        None
+    };
+    let dmabuf_overlay = if dmabuf_mode {
+        let existing = state.dmabuf_overlay.lock().unwrap().clone();
+        let native = match existing {
+            Some(native) => native,
+            None => {
+                let native = super::overlay::create_wayland_dmabuf(&app)
+                    .await
+                    .map_err(|error| format!("create Wayland DMABUF overlay: {error}"))?;
+                *state.dmabuf_overlay.lock().unwrap() = Some(native.clone());
+                native
+            }
+        };
+        Some(native)
+    } else {
+        None
+    };
 
     let bus = match &bus_addr {
         Some(addr) => zbus::connection::Builder::address(addr.as_str())
@@ -297,29 +601,51 @@ pub async fn start(
         .map_err(|e| format!("RegisterListener 失败: {e}"))?;
     eprintln!("[capture] RegisterListener OK");
 
-    let lconn = zbus::connection::Builder::unix_stream(our_stream)
-        .p2p()
-        .build()
-        .await
-        .map_err(|e| e.to_string())?;
-    eprintln!(
-        "[capture] p2p connection OK, unique={:?}",
-        lconn.unique_name()
-    );
-
     let scanouts = Arc::new(AtomicU64::new(0));
     let updates = Arc::new(AtomicU64::new(0));
+    let (dmabuf_ready, dmabuf_ready_rx) = if dmabuf_mode {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        (Arc::new(StdMutex::new(Some(sender))), Some(receiver))
+    } else {
+        (Arc::new(StdMutex::new(None)), None)
+    };
     let listener = ScanoutListener::new(
+        app.clone(),
         state.frame.clone(),
         state.dirty.clone(),
         scanouts.clone(),
         updates.clone(),
+        map_mode,
+        dmabuf_overlay,
+        dmabuf_ready,
     );
-    lconn
-        .object_server()
-        .at("/org/qemu/Display1/Listener", listener)
-        .await
+    let listener_path = "/org/qemu/Display1/Listener";
+    let mut builder = zbus::connection::Builder::unix_stream(our_stream)
+        .p2p()
+        .serve_at(listener_path, listener)
         .map_err(|e| e.to_string())?;
+    if let Some(overlay_frame) = overlay_frame.clone() {
+        let native_overlay = state.overlay.lock().unwrap().as_ref().unwrap().clone();
+        builder = builder
+            .serve_at(
+                "/org/qemu/Display1/Listener",
+                MapListener {
+                    frame: state.frame.clone(),
+                    dirty: state.dirty.clone(),
+                    overlay_frame,
+                    overlay: native_overlay,
+                    scanouts: scanouts.clone(),
+                    updates: updates.clone(),
+                    current: None,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    let lconn = builder.build().await.map_err(|e| e.to_string())?;
+    eprintln!(
+        "[capture] p2p connection OK, unique={:?}",
+        lconn.unique_name()
+    );
 
     state.on.store(true, Ordering::Relaxed);
     let on_flag = state.on.clone();
@@ -346,10 +672,12 @@ pub async fn start(
                 _ = msgs.next() => {}
                 _ = tick.tick() => {
                     // 周期合并推送帧（无更新时零开销）
-                    if let Some((raw_bytes, full)) = push_frame(&task_app, &task_frame, &task_dirty) {
-                        pushed += 1;
-                        pushed_full += u64::from(full);
-                        pushed_bytes += raw_bytes;
+                    if !map_mode && !dmabuf_mode {
+                        if let Some((raw_bytes, full)) = push_frame(&task_app, &task_frame, &task_dirty) {
+                            pushed += 1;
+                            pushed_full += u64::from(full);
+                            pushed_bytes += raw_bytes;
+                        }
                     }
                 }
                 _ = stats_tick.tick() => {
@@ -369,8 +697,36 @@ pub async fn start(
     });
     *state.task.lock().await = Some(task);
 
-    eprintln!("[capture] dbus-display 采集已启动（console {console_path}）");
-    Ok(format!("dbus 采集已启动（Console {console_path}）"))
+    if let Some(receiver) = dmabuf_ready_rx {
+        let ready = match tokio::time::timeout(std::time::Duration::from_secs(8), receiver).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("DMABUF listener closed before reporting the first frame".into()),
+            Err(_) => Err("timed out waiting for the first ScanoutDMABUF frame".into()),
+        };
+        if let Err(error) = ready {
+            stop(state).await;
+            return Err(format!("Wayland DMABUF startup failed: {error}"));
+        }
+    }
+
+    let mode_label = if dmabuf_mode {
+        "Wayland DMABUF direct import"
+    } else if map_mode {
+        "ScanoutMap native overlay"
+    } else {
+        "Canvas pixels"
+    };
+    let input_label = if std::env::var("VIRTCONSOLE_HID_MOUSE").as_deref() == Ok("1") {
+        "evdev HID relative mouse"
+    } else {
+        "D-Bus absolute mouse"
+    };
+    eprintln!(
+        "[capture] dbus-display 采集已启动（console {console_path}, mode={mode_label}, input={input_label}）"
+    );
+    Ok(format!(
+        "dbus 采集已启动（Console {console_path}, mode={mode_label}, input={input_label}）"
+    ))
 }
 
 /// 停止采集
@@ -380,6 +736,12 @@ pub async fn stop(state: &CaptureState) {
         t.abort();
     }
     *state.frame.lock().unwrap() = None;
+    if let Some(overlay) = state.overlay.lock().unwrap().as_ref() {
+        overlay.hide();
+    }
+    if let Some(overlay) = state.dmabuf_overlay.lock().unwrap().as_ref() {
+        overlay.hide();
+    }
     *state.input_bus.lock().unwrap() = None;
     *state.console_path.lock().unwrap() = None;
 }

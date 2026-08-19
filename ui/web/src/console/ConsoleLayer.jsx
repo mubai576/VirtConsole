@@ -10,7 +10,7 @@ import { useEffect, useImperativeHandle, useRef, forwardRef, useState } from "re
 import { invoke } from "../lib/ipc.js";
 import { setCrumb, setHint, resetStatusBar, toast } from "../lib/uiStore.js";
 import { useFrameStream } from "./useFrameStream.js";
-import { useInputForward } from "./useInputForward.js";
+import { setHidMouseEnabled, useInputForward } from "./useInputForward.js";
 
 const OBJECT_FIT = { fill: "fill", original: "none", fit: "contain" };
 
@@ -40,9 +40,11 @@ const ConsoleLayer = forwardRef(function ConsoleLayer(_props, ref) {
       toast(`正在连接 VM ${vmid} ...`);
 
       let captureErr = null;
+      setHidMouseEnabled(false);
       if (capture) {
         try {
-          await invoke("capture_start", { busAddr: null });
+          const result = await invoke("capture_start", { busAddr: null });
+          setHidMouseEnabled(result.includes("input=evdev HID relative mouse"));
         } catch (e) {
           captureErr = e;   // 不阻断：QMP 回退仍可用，画面走不了而已
         }

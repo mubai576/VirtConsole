@@ -89,25 +89,45 @@ export const suiteL = {
     // L4：真实环境（有 dbus-display VM）时，capture_start 后应能收到 vm-frame 帧事件
     await step("L4_dbus_frame_received", async () => {
       const frames = [];
+      const sizes = [];
       const unlisten = await window.__TAURI__.event.listen("vm-frame", (ev) => {
         if (ev.payload && ev.payload.data) frames.push(ev.payload);
       });
+      const unlistenSize = await window.__TAURI__.event.listen("vm-display-size", (ev) => {
+        if (ev.payload) sizes.push(ev.payload);
+      });
+      let startResult = "";
       try {
-        await invoke("capture_start", { busAddr: null });
+        startResult = await invoke("capture_start", { busAddr: null });
       } catch (e) {
         // 无 dbus VM：跳过本场景（非失败）
         console.log(`[VC-TEST] capture_start 不可用，跳过帧验证: ${e}`);
         await unlisten();
+        await unlistenSize();
         return;
       }
       // 等待最多 5 秒收集帧
       const deadline = Date.now() + 5000;
-      while (Date.now() < deadline && frames.length === 0) {
+      while (Date.now() < deadline && frames.length === 0 && sizes.length === 0) {
         await new Promise((r) => setTimeout(r, 250));
       }
       await invoke("capture_stop").catch(() => {});
       await unlisten();
+      await unlistenSize();
       console.log(`[VC-TEST] 收到 ${frames.length} 帧`);
+      const nativeMode = typeof startResult === "string" && (
+        startResult.includes("ScanoutMap native overlay") ||
+        startResult.includes("Wayland DMABUF direct import")
+      );
+      if (nativeMode) {
+        assert(frames.length === 0, `native overlay 不应发送像素 vm-frame，实际收到 ${frames.length} 帧`);
+        if (startResult.includes("Wayland DMABUF direct import")) {
+          const size = sizes.at(-1);
+          assert(size?.width > 0 && size?.height > 0,
+            `DMABUF 模式必须发送客户机尺寸元数据，实际 ${JSON.stringify(sizes)}`);
+        }
+        return;
+      }
       if (frames.length > 0) {
         const types = frames.map((f) => f.type || "full");
         console.log(`[VC-TEST] 帧类型: ${[...new Set(types)].join(",")}`);

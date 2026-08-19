@@ -67,6 +67,13 @@ export function mapToGuest(canvas, clientX, clientY) {
 
 const LOG_MAX = 64;
 const inputLog = [];
+let hidMouseEnabled = false;
+
+/** Native input-linux owns the complete relative mouse stream in HID mode. */
+export function setHidMouseEnabled(enabled) {
+  hidMouseEnabled = !!enabled;
+}
+
 if (typeof window !== "undefined") {
   window.__vcInputLog = () => inputLog.slice();
   window.__vcInputLogClear = () => { inputLog.length = 0; };
@@ -171,20 +178,20 @@ export function useInputForward(canvasRef, activeRef) {
     // 移动是高频事件，不进日志环（会把按键记录挤掉），但失败仍走同一个
     // 「首次可见」闸门 —— 指针不动这件事必须能被用户看到
     const onMove = (e) => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || hidMouseEnabled) return;
       const { x, y } = mapToGuest(canvas, e.clientX, e.clientY);
       invoke("capture_mouse_move", { x, y }).catch((err) => reportFail("指针", err));
     };
     // 未知键**丢弃**，不再 `?? 0`。原先的兜底把任何认不出的 button 变成左键：
     // 五键鼠标按侧键会在 guest 里点一下，比没反应更糟（点到什么全看指针位置）。
     const onDown = (e) => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || hidMouseEnabled) return;
       const b = BTN[e.button];
       if (b === undefined) return;
       send("capture_mouse_button", { button: b, down: true }, "鼠标键");
     };
     const onUp = (e) => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || hidMouseEnabled) return;
       const b = BTN[e.button];
       if (b === undefined) return;
       send("capture_mouse_button", { button: b, down: false }, "鼠标键");
@@ -215,6 +222,7 @@ export function useInputForward(canvasRef, activeRef) {
       if (!activeRef.current) return;
       // 不拦就是 webview 自己滚：整个页面会跟着动，客户机一点没收到
       e.preventDefault();
+      if (hidMouseEnabled) return;
       if (probe.length < 8) probe.push({ dy: e.deltaY, dx: e.deltaX, mode: e.deltaMode });
 
       accY += toPx(e.deltaY, e.deltaMode);
@@ -227,7 +235,7 @@ export function useInputForward(canvasRef, activeRef) {
     };
     // 移出画面时补一次抬起，避免按键卡住
     const onLeave = () => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || hidMouseEnabled) return;
       invoke("capture_mouse_button", { button: 0, down: false }).catch(() => {});
     };
 

@@ -11,25 +11,39 @@
 //!                           发给连接的客户端（配合 c/egl-import-test.c 做 C6 EGL 导入验证）
 //!   --export-scanout <path> 收到首个 Scanout 后把像素数据(raw)写到该文件
 //!                           （配合 c/scanout-check.py 校验画面非空）
+//!   --require-dmabuf      超时前未收到 DMABUF 或出现 fstat 失败时返回失败
+//!   --require-scanout-map 超时前未收到有效 Map 帧或出现映射失败时返回失败
+//!   --report <path>       退出时写入机器可读的实验报告（JSON）
 //!
 //! 验证判据（见 docs/90-历史记录.md M2.5）：C2 对象树可见 / C3 收到 Scanout|ScanoutMap / C4 收到 ScanoutDMABUF
 //!
 //! 连接方式参考 QEMU tests/qtest/dbus-display-test.c：
 //!   探针侧以 AUTHENTICATION_CLIENT 身份，QEMU 侧为 AUTHENTICATION_SERVER。
 
+#[cfg(unix)]
 mod listener;
 
-use std::os::unix::io::AsRawFd;
 use std::process::ExitCode;
-use std::sync::Arc;
-use std::time::Duration;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
-use listener::ScanoutListener;
+#[cfg(unix)]
+use listener::{DmabufExport, ScanoutListener, ScanoutMapListener};
+
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
 use zbus::zvariant::OwnedFd;
+#[cfg(unix)]
 use zbus::{proxy, Connection};
 
 /// org.qemu.Display1.VM 代理（对象路径 /org/qemu/Display1/VM）
-#[proxy(interface = "org.qemu.Display1.VM", default_service = "org.qemu", default_path = "/org/qemu/Display1/VM")]
+#[cfg(unix)]
+#[proxy(
+    interface = "org.qemu.Display1.VM",
+    default_service = "org.qemu",
+    default_path = "/org/qemu/Display1/VM"
+)]
 trait QemuVm {
     #[zbus(property)]
     fn name(&self) -> zbus::Result<String>;
@@ -39,6 +53,7 @@ trait QemuVm {
 }
 
 /// org.qemu.Display1.Console 代理（对象路径 /org/qemu/Display1/Console_$id）
+#[cfg(unix)]
 #[proxy(interface = "org.qemu.Display1.Console", default_service = "org.qemu")]
 trait QemuConsole {
     /// Unix 下 RegisterListener 签名 (h)：传入 socketpair 一端 fd，QEMU 在其上以 server 身份连接。
@@ -68,11 +83,28 @@ async fn main() -> ExitCode {
 async fn run() -> Result<u8, Box<dyn std::error::Error>> {
     use std::os::fd::FromRawFd;
 
-    let (bus_addr, console_id, timeout, export_path, export_scanout) = parse_args();
+    let Args {
+        bus_addr,
+        console_id,
+        timeout,
+        export_path,
+        export_scanout,
+        require_dmabuf,
+        require_scanout_map,
+        report_path,
+    } = parse_args();
+    let map_mode = std::env::var("VIRTCONSOLE_SCANOUT_MAP").as_deref() == Ok("1");
+    if map_mode {
+        println!("[模式] VIRTCONSOLE_SCANOUT_MAP=1，Listener 将只声明 Unix.Map");
+    }
 
     // 1. 连接 D-Bus（session 或自定义地址，对应 QEMU -display dbus 的两种总线模式）
     let bus = match &bus_addr {
-        Some(addr) => zbus::connection::Builder::address(addr.as_str())?.build().await?,
+        Some(addr) => {
+            zbus::connection::Builder::address(addr.as_str())?
+                .build()
+                .await?
+        }
         None => Connection::session().await?,
     };
     println!(
@@ -120,7 +152,10 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
     }
     let our_stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(our_fd) };
     let our_stream = tokio::net::UnixStream::from_std(our_stream)?;
-    println!("[4] 已创建 socketpair（QEMU 端 fd={}，本地端 fd={}）", qemu_fd, our_fd);
+    println!(
+        "[4] 已创建 socketpair（QEMU 端 fd={}，本地端 fd={}）",
+        qemu_fd, our_fd
+    );
 
     // 5. 调用 RegisterListener，把 socketpair 一端 fd 交给 QEMU（Unix 签名为单参 h）。
     //    必须先于本地 p2p 连接构建：zbus build() 会阻塞等待对端 D-Bus 认证应答，
@@ -129,23 +164,40 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
     println!("[5] RegisterListener 调用成功");
 
     // 6. 本地作为 p2p client 建立连接（QEMU 侧为 server），并 serve Listener 接口
-    let mut listener = ScanoutListener::new();
+    let mut listener = ScanoutListener::new_with_map_mode(map_mode);
     // 若指定 --export-dmabuf：启动 Unix socket server，收到 dmabuf 后转发给 EGL 测试程序
     if let Some(sockpath) = &export_path {
         let _ = std::fs::remove_file(sockpath);
         let listener_sock = std::os::unix::net::UnixListener::bind(sockpath)?;
-        listener_sock.set_nonblocking(true)?;
-        listener.on_dmabuf = Some(std::sync::Arc::new(move |fd, w, h, stride, fourcc, modifier| {
-            match listener_sock.accept() {
-                Ok((stream, _)) => {
-                    let fd_raw = stream.as_raw_fd();
-                    if send_dmabuf(fd_raw, fd, w, h, stride, fourcc, modifier).is_err() {
-                        eprintln!("  [warn] send_dmabuf 失败");
+        // Keep accept blocking: QEMU may deliver the only full ScanoutDMABUF as
+        // soon as the listener is registered. Waiting for the EGL client here
+        // prevents the probe from discarding that decisive first fd.
+        let exported = std::sync::atomic::AtomicBool::new(false);
+        listener.on_dmabuf = Some(std::sync::Arc::new(move |frame| {
+            let result = if exported.load(std::sync::atomic::Ordering::Acquire) {
+                Ok(())
+            } else {
+                match listener_sock.accept() {
+                    Ok((stream, _)) => {
+                        let fd_raw = stream.as_raw_fd();
+                        let result = send_dmabuf(fd_raw, &frame);
+                        if result.is_err() {
+                            eprintln!("  [warn] send_dmabuf 失败");
+                        }
+                        eprintln!("  [export] 已将 dmabuf fd={} 发送给 EGL 测试程序", frame.fd);
+                        if result.is_ok() {
+                            exported.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                        result
                     }
-                    eprintln!("  [export] 已将首个 dmabuf fd={} 发送给 EGL 测试程序", fd);
+                    Err(e) => Err(e),
                 }
-                Err(e) => eprintln!("  [warn] 等待 EGL 测试连接失败: {e}"),
+            };
+            if let Err(e) = result {
+                eprintln!("  [warn] DMABUF 导出失败: {e}");
             }
+            // The duplicate is owned by this callback and must never escape it.
+            unsafe { libc::close(frame.fd) };
         }));
         println!("[6-export] 等待 EGL 测试程序连接: {sockpath}");
     }
@@ -154,32 +206,45 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
         let outpath = outpath.clone();
         println!("[6-export] 首个 Scanout 帧将保存到: {}", outpath.clone());
         listener.on_scanout = Some(std::sync::Arc::new(move |data, w, h, stride, _fmt| {
-            static WRITTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            static WRITTEN: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
             if WRITTEN.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
             match std::fs::write(&outpath, data) {
-                Ok(_) => eprintln!("  [export] 已保存首个 Scanout 帧 {}x{} stride={} {}B", w, h, stride, data.len()),
+                Ok(_) => eprintln!(
+                    "  [export] 已保存首个 Scanout 帧 {}x{} stride={} {}B",
+                    w,
+                    h,
+                    stride,
+                    data.len()
+                ),
                 Err(e) => eprintln!("  [warn] 写 Scanout 帧失败: {e}"),
             }
         }));
     }
-    let stats = Arc::new(listener.stats.clone());
+    let stats = listener.stats.clone();
     let frame_counter = listener.frame_counter.clone();
-    let lconn = zbus::connection::Builder::unix_stream(our_stream)
+    let listener_path = "/org/qemu/Display1/Listener";
+    let mut builder = zbus::connection::Builder::unix_stream(our_stream)
         .p2p()
-        .build()
-        .await?;
-    lconn.object_server()
-        .at("/org/qemu/Display1/Listener", listener)
-        .await?;
+        .serve_at(listener_path, listener)?;
+    if map_mode {
+        builder = builder.serve_at(
+            listener_path,
+            ScanoutMapListener::new(stats.clone(), frame_counter.clone()),
+        )?;
+    }
+    // serve_at makes both interfaces visible before QEMU sends the initial frame.
+    let lconn = builder.build().await?;
     println!("[6] Listener 已就绪（p2p D-Bus，path=/org/qemu/Display1/Listener）");
 
     // 7. 等待事件 / 周期性输出统计 / Ctrl-C 或 timeout 退出
     let timeout = timeout.unwrap_or(0);
     let run_forever = timeout == 0;
     let mut tick = tokio::time::interval(Duration::from_secs(2));
-    let mut elapsed = 0u64;
+    let started = Instant::now();
+    let mut fd_baseline = None;
     loop {
         let should_exit = tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -187,14 +252,27 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
                 true
             }
             _ = tick.tick() => {
-                elapsed += 2;
+                if fd_baseline.is_none() {
+                    // Sample after tokio has installed its signal/runtime fds.
+                    fd_baseline = open_fd_count();
+                }
                 let s = stats.lock().unwrap();
                 println!(
-                    "[统计] 累计 {} 帧 | Scanout={} Update={} Map={} DMABUF={}",
+                    "[统计] 累计 {} 帧 | Scanout={} Update={} Map={} MapUpdate={} valid={} map_fail={} DMABUF={} dup={} close={} fstat_fail={}",
                     frame_counter.load(std::sync::atomic::Ordering::Relaxed),
-                    s.scans, s.updates, s.maps, s.dmabufs
+                    s.scans,
+                    s.updates,
+                    s.maps,
+                    s.map_updates,
+                    s.map_valid,
+                    s.map_fstat_failures
+                        + s.map_metadata_failures
+                        + s.map_mmap_failures
+                        + s.map_format_failures,
+                    s.dmabufs,
+                    s.dmabuf_fds_duplicated, s.dmabuf_fds_released, s.dmabuf_fstat_failures
                 );
-                if !run_forever && elapsed >= timeout {
+                if !run_forever && started.elapsed() >= Duration::from_secs(timeout) {
                     println!("[结束] 达到 timeout={timeout}s");
                     true
                 } else {
@@ -207,17 +285,121 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
         }
     }
 
+    // Drop the p2p connection before reading final fd statistics so the retained
+    // Map fd and mmap are released and counted.
+    drop(lconn);
+    let s = stats.lock().unwrap();
+    let duration = started.elapsed();
+    let dmabuf_fps = s.dmabufs as f64 / duration.as_secs_f64().max(0.001);
+    let fd_final = open_fd_count();
+    let no_fd_leak = match (fd_baseline, fd_final) {
+        (Some(before), Some(after)) => after <= before,
+        _ => false,
+    };
+    let dmabuf_ok = s.dmabufs > 0
+        && s.dmabuf_fstat_failures == 0
+        && s.dmabuf_fds_duplicated == s.dmabuf_fds_released
+        && no_fd_leak;
+    let map_failures = s.map_fstat_failures
+        + s.map_metadata_failures
+        + s.map_mmap_failures
+        + s.map_format_failures;
+    let map_ok = s.maps > 0
+        && s.map_valid == s.maps
+        && s.map_fds_received == s.maps
+        && s.map_fds_released == s.maps
+        && s.map_fstat_successes == s.maps
+        && map_failures == 0
+        && s.map_empty_frames == 0
+        && (s.maps > 1 || s.map_updates > 0)
+        && no_fd_leak;
+    if let Some(path) = report_path {
+        let report = format!(
+            "{{\"duration_ms\":{},\"dmabuf_fps\":{:.3},\"map_fps\":{:.3},\"frames\":{},\"scanout\":{},\"update\":{},\"map\":{},\"map_update\":{},\"map_valid\":{},\"map_fds_received\":{},\"map_fds_released\":{},\"map_fstat_successes\":{},\"map_failures\":{},\"map_fstat_failures\":{},\"map_metadata_failures\":{},\"map_mmap_failures\":{},\"map_format_failures\":{},\"map_empty_frames\":{},\"map_bytes_sampled\":{},\"map_offset\":{},\"map_width\":{},\"map_height\":{},\"map_stride\":{},\"map_pixman_format\":{},\"map_checksum\":{},\"dmabuf\":{},\"fd_duplicated\":{},\"fd_released\":{},\"fstat_failures\":{},\"fd_baseline\":{},\"fd_final\":{},\"no_fd_leak\":{},\"dmabuf_liveness\":{},\"map_liveness\":{},\"width\":{},\"height\":{},\"stride\":{},\"fourcc\":{},\"modifier\":{},\"y0_top\":{}}}\n",
+            duration.as_millis(),
+            dmabuf_fps,
+            s.maps as f64 / duration.as_secs_f64().max(0.001),
+            frame_counter.load(std::sync::atomic::Ordering::Relaxed),
+            s.scans,
+            s.updates,
+            s.maps,
+            s.map_updates,
+            s.map_valid,
+            s.map_fds_received,
+            s.map_fds_released,
+            s.map_fstat_successes,
+            map_failures,
+            s.map_fstat_failures,
+            s.map_metadata_failures,
+            s.map_mmap_failures,
+            s.map_format_failures,
+            s.map_empty_frames,
+            s.map_bytes_sampled,
+            s.map_last_offset,
+            s.map_last_width,
+            s.map_last_height,
+            s.map_last_stride,
+            s.map_last_pixman_format,
+            s.map_last_checksum,
+            s.dmabufs,
+            s.dmabuf_fds_duplicated,
+            s.dmabuf_fds_released,
+            s.dmabuf_fstat_failures,
+            fd_baseline.unwrap_or(0),
+            fd_final.unwrap_or(0),
+            no_fd_leak,
+            dmabuf_ok,
+            map_ok,
+            s.last_width, s.last_height, s.last_stride, s.last_fourcc,
+            s.last_modifier, s.last_y0_top
+        );
+        std::fs::write(&path, report)?;
+        println!("[报告] 已写入 {path}");
+    }
+    if require_dmabuf && !dmabuf_ok {
+        eprintln!("[失败] --require-dmabuf 验收未通过：未收到有效 DMABUF 或 fd 生命周期异常");
+        return Ok(3);
+    }
+    if require_scanout_map && !map_ok {
+        eprintln!(
+            "[失败] --require-scanout-map 验收未通过：maps={} valid={} failures={} empty={} map_updates={} no_fd_leak={}",
+            s.maps, s.map_valid, map_failures, s.map_empty_frames, s.map_updates, no_fd_leak
+        );
+        return Ok(4);
+    }
     Ok(0)
 }
 
 #[cfg(unix)]
-fn parse_args() -> (Option<String>, Option<u32>, Option<u64>, Option<String>, Option<String>) {
+fn open_fd_count() -> Option<usize> {
+    std::fs::read_dir("/proc/self/fd")
+        .ok()
+        .map(|entries| entries.count())
+}
+
+#[cfg(unix)]
+struct Args {
+    bus_addr: Option<String>,
+    console_id: Option<u32>,
+    timeout: Option<u64>,
+    export_path: Option<String>,
+    export_scanout: Option<String>,
+    require_dmabuf: bool,
+    require_scanout_map: bool,
+    report_path: Option<String>,
+}
+
+#[cfg(unix)]
+fn parse_args() -> Args {
     let mut args = std::env::args().skip(1);
     let mut bus_addr = None;
     let mut console_id = None;
     let mut timeout = None;
     let mut export = None;
     let mut export_scanout = None;
+    let mut require_dmabuf = false;
+    let mut require_scanout_map = false;
+    let mut report_path = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--bus-addr" => bus_addr = args.next(),
@@ -225,26 +407,30 @@ fn parse_args() -> (Option<String>, Option<u32>, Option<u64>, Option<String>, Op
             "--timeout" => timeout = args.next().and_then(|v| v.parse().ok()),
             "--export-dmabuf" => export = args.next(),
             "--export-scanout" => export_scanout = args.next(),
+            "--require-dmabuf" => require_dmabuf = true,
+            "--require-scanout-map" => require_scanout_map = true,
+            "--report" => report_path = args.next(),
             _ => {}
         }
     }
-    (bus_addr, console_id, timeout, export, export_scanout)
+    Args {
+        bus_addr,
+        console_id,
+        timeout,
+        export_path: export,
+        export_scanout,
+        require_dmabuf,
+        require_scanout_map,
+        report_path,
+    }
 }
 
 /// 通过 Unix socket 用 SCM_RIGHTS 把 dmabuf fd 发送给对端（EGL 测试程序）。
 /// 先发元数据（FrameInfo 结构），再发带 fd 的消息。
 #[cfg(unix)]
-fn send_dmabuf(
-    sock_fd: std::os::unix::io::RawFd,
-    dmabuf: i32,
-    width: u32,
-    height: u32,
-    stride: u32,
-    fourcc: u32,
-    modifier: u64,
-) -> std::io::Result<()> {
-    use std::os::unix::io::{FromRawFd, RawFd};
+fn send_dmabuf(sock_fd: std::os::unix::io::RawFd, frame: &DmabufExport) -> std::io::Result<()> {
     use std::io::Write;
+    use std::os::unix::io::{FromRawFd, RawFd};
 
     #[repr(C)]
     struct FrameInfo {
@@ -253,10 +439,21 @@ fn send_dmabuf(
         stride: u32,
         fourcc: u32,
         modifier: u64,
+        y0_top: u8,
     }
-    let info = FrameInfo { width, height, stride, fourcc, modifier };
+    let info = FrameInfo {
+        width: frame.width,
+        height: frame.height,
+        stride: frame.stride,
+        fourcc: frame.fourcc,
+        modifier: frame.modifier,
+        y0_top: u8::from(frame.y0_top),
+    };
     let info_bytes = unsafe {
-        std::slice::from_raw_parts(&info as *const FrameInfo as *const u8, std::mem::size_of::<FrameInfo>())
+        std::slice::from_raw_parts(
+            &info as *const FrameInfo as *const u8,
+            std::mem::size_of::<FrameInfo>(),
+        )
     };
     let mut sock = unsafe { std::os::unix::net::UnixStream::from_raw_fd(sock_fd) };
     sock.write_all(info_bytes)?;
@@ -280,7 +477,7 @@ fn send_dmabuf(
         (*cmsg).cmsg_type = libc::SCM_RIGHTS;
         (*cmsg).cmsg_len = std::mem::size_of::<libc::cmsghdr>() + std::mem::size_of::<RawFd>();
         std::ptr::copy_nonoverlapping(
-            &dmabuf as *const i32 as *const u8,
+            &frame.fd as *const i32 as *const u8,
             libc::CMSG_DATA(cmsg),
             std::mem::size_of::<RawFd>(),
         );
@@ -289,7 +486,5 @@ fn send_dmabuf(
     if n < 0 {
         return Err(std::io::Error::last_os_error());
     }
-    // 让出所有权给回调场景（fd 已 dup 过，这里需要 close 避免泄漏由调用方负责）
-    std::mem::forget(sock);
     Ok(())
 }

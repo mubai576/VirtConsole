@@ -10,6 +10,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -26,3 +27,7 @@ futures-util = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 # dbus-display 采集仅 Linux 目标使用（zbus 已在通用依赖，这里仅为文档化）
+gtk = "0.18"
+glib = "0.18"
+cairo-rs = "0.18"
+gdkwayland-sys = "0.18"

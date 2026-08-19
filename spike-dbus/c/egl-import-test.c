@@ -12,6 +12,10 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
+#include <stdint.h>
+#include <time.h>
+#include <signal.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -24,7 +28,18 @@ typedef struct {
     uint32_t stride;
     uint32_t fourcc;
     uint64_t modifier;
+    uint8_t y0_top;
 } FrameInfo;
+
+static void import_crash_handler(int sig) {
+    const char message[] = "IMPORT_VERDICT: CRASH during EGL import/render\n";
+    (void)write(STDERR_FILENO, message, sizeof(message) - 1);
+    _exit(128 + sig);
+}
+
+#ifndef DRM_FORMAT_MOD_LINEAR
+#define DRM_FORMAT_MOD_LINEAR 0ULL
+#endif
 
 static int recv_fd_with_meta(int sock, FrameInfo *info) {
     // 先收元数据
@@ -62,12 +77,58 @@ static void check_egl(const char *what, EGLBoolean ok) {
     }
 }
 
+static EGLImage import_dmabuf(EGLDisplay dpy, PFNEGLCREATEIMAGEKHRPROC create_image,
+                              const FrameInfo *info, int fd, const char *mode) {
+    uint64_t modifier = info->modifier;
+    int include_modifier = strcmp(mode, "no-modifier") != 0;
+    if (strcmp(mode, "linear") == 0) modifier = DRM_FORMAT_MOD_LINEAR;
+    EGLint attrs[32];
+    int i = 0;
+    attrs[i++] = EGL_LINUX_DMA_BUF_EXT;
+    attrs[i++] = EGL_LINUX_DRM_FOURCC_EXT;
+    attrs[i++] = (EGLint)info->fourcc;
+    attrs[i++] = EGL_WIDTH;
+    attrs[i++] = (EGLint)info->width;
+    attrs[i++] = EGL_HEIGHT;
+    attrs[i++] = (EGLint)info->height;
+    attrs[i++] = EGL_DMA_BUF_PLANE0_FD_EXT;
+    attrs[i++] = fd;
+    attrs[i++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
+    attrs[i++] = 0;
+    attrs[i++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
+    attrs[i++] = (EGLint)info->stride;
+    if (include_modifier) {
+        attrs[i++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+        attrs[i++] = (EGLint)(modifier & 0xFFFFFFFFu);
+        attrs[i++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+        attrs[i++] = (EGLint)((modifier >> 32) & 0xFFFFFFFFu);
+    }
+    attrs[i++] = EGL_NONE;
+    EGLImage image = create_image(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+                                  (EGLClientBuffer)NULL, attrs);
+    if (image == EGL_NO_IMAGE)
+        fprintf(stderr, "eglCreateImageKHR mode=%s failed: 0x%x\n", mode, eglGetError());
+    return image;
+}
+
+static double elapsed_ms(const struct timespec *start, const struct timespec *end) {
+    return (end->tv_sec - start->tv_sec) * 1000.0 +
+           (end->tv_nsec - start->tv_nsec) / 1000000.0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <unix-socket-path>\n", argv[0]);
+        fprintf(stderr, "usage: %s <unix-socket-path> [original|linear|no-modifier]\n", argv[0]);
         return 2;
     }
     const char *sockpath = argv[1];
+    const char *mode = argc >= 3 ? argv[2] : "original";
+    signal(SIGSEGV, import_crash_handler);
+    signal(SIGABRT, import_crash_handler);
+    if (strcmp(mode, "original") != 0 && strcmp(mode, "linear") != 0 && strcmp(mode, "no-modifier") != 0) {
+        fprintf(stderr, "unknown mode '%s' (use original, linear, or no-modifier)\n", mode);
+        return 2;
+    }
 
     // 连接探针的 socket（带重试：探针可能在 listener 就绪前尚未 accept）
     int sock = -1;
@@ -93,10 +154,25 @@ int main(int argc, char **argv) {
     FrameInfo info;
     int dmabuf = recv_fd_with_meta(sock, &info);
     if (dmabuf < 0) return 1;
+    struct stat st;
+    if (fstat(dmabuf, &st) != 0) {
+        fprintf(stderr, "fstat(dmabuf) failed: %s\n", strerror(errno));
+        close(dmabuf);
+        return 1;
+    }
     printf("received dmabuf fd=%d %ux%u stride=%u fourcc=0x%08X modifier=0x%016llX\n",
            dmabuf, info.width, info.height, info.stride, info.fourcc,
            (unsigned long long)info.modifier);
+    printf("y0_top=%u mode=%s fd_type=%s\n", info.y0_top, mode,
+           S_ISCHR(st.st_mode) ? "char" : (S_ISREG(st.st_mode) ? "regular" : "other"));
     close(sock);
+
+    if (strcmp(mode, "linear") == 0 && info.modifier != DRM_FORMAT_MOD_LINEAR) {
+        fprintf(stderr,
+                "IMPORT_VERDICT: FAIL mode=linear reason=source_modifier_not_linear\n");
+        close(dmabuf);
+        return 1;
+    }
 
     // EGL init：优先 EGL_PLATFORM_DEVICE_EXT（surfaceless，无 X11/Wayland），
     // 退回到 EGL_DEFAULT_DISPLAY
@@ -155,21 +231,32 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // 查询驱动对该 fourcc+modifier 的支持（诊断用）
+    // 查询驱动对目标 fourcc+modifier 的支持。external_ok 是严格验收条件，
+    // 仅“出现在列表里”不能证明外部进程可以导入。
     PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT =
         (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+    int modifier_query_ok = 0;
+    int selected_external_ok = 0;
+    uint64_t selected_modifier = info.modifier;
+    if (strcmp(mode, "linear") == 0) selected_modifier = DRM_FORMAT_MOD_LINEAR;
     if (eglQueryDmaBufModifiersEXT) {
         EGLuint64KHR mods[16];
         EGLBoolean ext_ok[16];
         EGLint nmods = 0;
         if (eglQueryDmaBufModifiersEXT(dpy, info.fourcc, 16, mods, ext_ok, &nmods)) {
+            modifier_query_ok = 1;
             printf("dma_buf_import_modifiers: %d modifiers supported for fourcc=0x%08X\n",
                    nmods, info.fourcc);
             int found = 0;
             for (EGLint i = 0; i < nmods; i++) {
                 printf("  mod[%d]=0x%016llX external_ok=%s\n", i,
                        (unsigned long long)mods[i], ext_ok[i] ? "yes" : "no");
-                if (mods[i] == info.modifier) { found = 1; printf("  -> 目标 modifier 受支持\n"); }
+                if (mods[i] == selected_modifier) {
+                    found = 1;
+                    selected_external_ok = ext_ok[i] ? 1 : 0;
+                    printf("  -> 当前模式目标 modifier=%s, external_ok=%s\n",
+                           mode, selected_external_ok ? "yes" : "no");
+                }
             }
             if (!found && nmods > 0) {
                 printf("  !!! 目标 modifier=0x%016llX 不在支持列表，EGL 导入将失败\n",
@@ -182,39 +269,24 @@ int main(int argc, char **argv) {
         printf("no eglQueryDmaBufModifiersEXT\n");
     }
 
-    EGLint img_attrs[] = {
-        EGL_LINUX_DMA_BUF_EXT, EGL_LINUX_DRM_FOURCC_EXT, (EGLint)info.fourcc,
-        EGL_WIDTH, (EGLint)info.width,
-        EGL_HEIGHT, (EGLint)info.height,
-        EGL_DMA_BUF_PLANE0_FD_EXT, dmabuf,
-        EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-        EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)info.stride,
-        EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (EGLint)(info.modifier & 0xFFFFFFFF),
-        EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (EGLint)((info.modifier >> 32) & 0xFFFFFFFF),
-        EGL_NONE
-    };
-    EGLImage img = eglCreateImageKHR(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
-                                     (EGLClientBuffer)NULL, img_attrs);
+    if (strcmp(mode, "original") == 0 &&
+        (!modifier_query_ok || !selected_external_ok)) {
+        fprintf(stderr, "IMPORT_VERDICT: FAIL mode=%s reason=modifier_not_external\n", mode);
+        close(dmabuf);
+        return 1;
+    }
+
+    struct timespec import_start, import_end;
+    clock_gettime(CLOCK_MONOTONIC, &import_start);
+    EGLImage img = import_dmabuf(dpy, eglCreateImageKHR, &info, dmabuf, mode);
+    clock_gettime(CLOCK_MONOTONIC, &import_end);
+    double import_time_ms = elapsed_ms(&import_start, &import_end);
     if (img == EGL_NO_IMAGE) {
-        fprintf(stderr, "eglCreateImageKHR failed: 0x%x (尝试无 modifier 版本)\n", eglGetError());
-        EGLint img_attrs2[] = {
-            EGL_LINUX_DMA_BUF_EXT, EGL_LINUX_DRM_FOURCC_EXT, (EGLint)info.fourcc,
-            EGL_WIDTH, (EGLint)info.width,
-            EGL_HEIGHT, (EGLint)info.height,
-            EGL_DMA_BUF_PLANE0_FD_EXT, dmabuf,
-            EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-            EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)info.stride,
-            EGL_NONE
-        };
-        img = eglCreateImageKHR(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
-                                (EGLClientBuffer)NULL, img_attrs2);
-        if (img == EGL_NO_IMAGE) {
-            fprintf(stderr, "eglCreateImageKHR (no modifier) failed: 0x%x\n", eglGetError());
-            return 1;
-        }
-        printf("imported without modifier\n");
+        fprintf(stderr, "IMPORT_VERDICT: FAIL mode=%s import_ms=%.3f\n", mode, import_time_ms);
+        close(dmabuf);
+        return 1;
     } else {
-        printf("imported with modifier\n");
+        printf("imported mode=%s import_ms=%.3f\n", mode, import_time_ms);
     }
 
     // 绑定纹理 + 渲染到 FBO + 读像素
@@ -242,6 +314,7 @@ int main(int argc, char **argv) {
     uint8_t *pixels = malloc(npx * 4);
     if (!pixels) return 1;
     memset(pixels, 0xAA, npx * 4);
+    glFinish();
     glReadPixels(0, 0, info.width, info.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     GLenum rerr = glGetError();
     if (rerr != GL_NO_ERROR) {
@@ -265,9 +338,12 @@ int main(int argc, char **argv) {
            npx ? (double)sum / npx : 0.0,
            (unsigned long long)nonzero_chan,
            first[0], first[1], first[2], first[3]);
-    printf("C6_VERDICT: %s\n", nonblack > npx / 10 ? "PASS" : (nonblack > 0 ? "PARTIAL" : "FAIL"));
+    const char *verdict = nonblack > npx / 10 ? "PASS" : (nonblack > 0 ? "PARTIAL" : "FAIL");
+    printf("IMPORT_VERDICT: %s mode=%s import_ms=%.3f pixels=%zu y0_top=%u fence=none\n",
+           verdict, mode, import_time_ms, npx, info.y0_top);
 
     eglDestroyImageKHR(dpy, img);
     free(pixels);
+    close(dmabuf);
     return nonblack > npx / 10 ? 0 : 1;
 }
