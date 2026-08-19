@@ -16,7 +16,7 @@ SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 RUNTIME_DEPS="weston wayland-protocols mesa-utils pciutils seatd"
 # vc-ui（Tauri）构建依赖；已在装有 Rust 的构建机上运行 cargo build --release -p vc-ui
-BUILD_DEPS="build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev"
+BUILD_DEPS="build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libwayland-dev libwayland-bin"
 # 前端（Vite/React）构建依赖：Vite 7 要求 Node >= 20.19，Debian 12 自带 18 过旧
 NODE_MIN_MAJOR=20
 WEB_DIR_REL="ui/web"

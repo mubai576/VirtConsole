@@ -19,6 +19,11 @@ struct vc_buffer {
     struct vc_buffer *next;
     bool current;
     bool released;
+    bool damage_pending;
+    int32_t damage_x;
+    int32_t damage_y;
+    int32_t damage_width;
+    int32_t damage_height;
 };
 
 struct vc_dmabuf_overlay {
@@ -125,12 +130,28 @@ static void destroy_buffer(struct vc_buffer *entry)
     free(entry);
 }
 
+static void submit_damage(struct vc_buffer *entry)
+{
+    struct vc_dmabuf_overlay *overlay = entry->owner;
+    if (!entry->current || !entry->released || !entry->damage_pending)
+        return;
+    entry->damage_pending = false;
+    entry->released = false;
+    wl_surface_attach(overlay->surface, entry->buffer, 0, 0);
+    wl_surface_damage_buffer(overlay->surface, entry->damage_x, entry->damage_y,
+                             entry->damage_width, entry->damage_height);
+    wl_surface_commit(overlay->surface);
+    wl_display_flush(overlay->display);
+}
+
 static void buffer_release(void *data, struct wl_buffer *buffer)
 {
     struct vc_buffer *entry = data;
     (void)buffer;
     entry->released = true;
-    if (!entry->current)
+    if (entry->current)
+        submit_damage(entry);
+    else
         destroy_buffer(entry);
 }
 
@@ -281,11 +302,26 @@ void vc_dmabuf_overlay_damage(void *overlay_ptr, int32_t x, int32_t y,
     struct vc_dmabuf_overlay *overlay = overlay_ptr;
     if (!overlay || !overlay->current || width <= 0 || height <= 0)
         return;
-    overlay->current->released = false;
-    wl_surface_attach(overlay->surface, overlay->current->buffer, 0, 0);
-    wl_surface_damage_buffer(overlay->surface, x, y, width, height);
-    wl_surface_commit(overlay->surface);
-    wl_display_flush(overlay->display);
+    struct vc_buffer *entry = overlay->current;
+    if (!entry->damage_pending) {
+        entry->damage_x = x;
+        entry->damage_y = y;
+        entry->damage_width = width;
+        entry->damage_height = height;
+        entry->damage_pending = true;
+    } else {
+        int32_t right = entry->damage_x + entry->damage_width;
+        int32_t bottom = entry->damage_y + entry->damage_height;
+        int32_t new_right = x + width;
+        int32_t new_bottom = y + height;
+        if (x < entry->damage_x) entry->damage_x = x;
+        if (y < entry->damage_y) entry->damage_y = y;
+        if (new_right > right) right = new_right;
+        if (new_bottom > bottom) bottom = new_bottom;
+        entry->damage_width = right - entry->damage_x;
+        entry->damage_height = bottom - entry->damage_y;
+    }
+    submit_damage(entry);
 }
 
 void vc_dmabuf_overlay_resize(void *overlay_ptr, int32_t width, int32_t height)

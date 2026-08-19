@@ -57,6 +57,8 @@ struct ScanoutListener {
     scanouts: Arc<AtomicU64>,
     updates: Arc<AtomicU64>,
     map_mode: bool,
+    native_overlay: Option<NativeOverlay>,
+    native_frame: Option<Arc<StdMutex<OverlayFrame>>>,
     dmabuf_overlay: Option<WaylandDmabufOverlay>,
     dmabuf_ready: Arc<StdMutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>>,
 }
@@ -69,6 +71,8 @@ impl ScanoutListener {
         scanouts: Arc<AtomicU64>,
         updates: Arc<AtomicU64>,
         map_mode: bool,
+        native_overlay: Option<NativeOverlay>,
+        native_frame: Option<Arc<StdMutex<OverlayFrame>>>,
         dmabuf_overlay: Option<WaylandDmabufOverlay>,
         dmabuf_ready: Arc<StdMutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>>,
     ) -> Self {
@@ -79,6 +83,8 @@ impl ScanoutListener {
             scanouts,
             updates,
             map_mode,
+            native_overlay,
+            native_frame,
             dmabuf_overlay,
             dmabuf_ready,
         }
@@ -112,6 +118,22 @@ impl ScanoutListener {
         let rgb = xrgb_to_rgb(&data, width, height, stride);
         *self.frame.lock().unwrap() = Some(FrameBuf { width, height, rgb });
         *self.dirty.lock().unwrap() = DirtyState::Full;
+        if self.map_mode {
+            if let (Some(overlay), Some(target)) = (&self.native_overlay, &self.native_frame) {
+                let frame = self.frame.lock().unwrap();
+                if let Some(frame) = frame.as_ref() {
+                    let mut target = target.lock().unwrap();
+                    target.width = frame.width;
+                    target.height = frame.height;
+                    target.pixels.clone_from(&frame.rgb);
+                }
+                let _ = self.app.emit(
+                    "vm-display-size",
+                    serde_json::json!({ "width": width, "height": height }),
+                );
+                overlay.draw();
+            }
+        }
         Ok(())
     }
 
@@ -361,6 +383,7 @@ impl MappedFrame {
 }
 
 struct MapListener {
+    app: AppHandle,
     frame: Arc<StdMutex<Option<FrameBuf>>>,
     dirty: Arc<StdMutex<DirtyState>>,
     overlay_frame: Arc<StdMutex<OverlayFrame>>,
@@ -412,6 +435,10 @@ impl MapListener {
         *self.frame.lock().unwrap() = Some(frame);
         *self.dirty.lock().unwrap() = DirtyState::Full;
         self.scanouts.fetch_add(1, Ordering::Relaxed);
+        let _ = self.app.emit(
+            "vm-display-size",
+            serde_json::json!({ "width": width, "height": height }),
+        );
         self.publish();
         self.overlay.draw();
         Ok(())
@@ -616,6 +643,8 @@ pub async fn start(
         scanouts.clone(),
         updates.clone(),
         map_mode,
+        state.overlay.lock().unwrap().as_ref().cloned(),
+        overlay_frame.clone(),
         dmabuf_overlay,
         dmabuf_ready,
     );
@@ -630,6 +659,7 @@ pub async fn start(
             .serve_at(
                 "/org/qemu/Display1/Listener",
                 MapListener {
+                    app: app.clone(),
                     frame: state.frame.clone(),
                     dirty: state.dirty.clone(),
                     overlay_frame,
