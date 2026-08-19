@@ -12,10 +12,9 @@
 //!   --export-scanout <path> 收到首个 Scanout 后把像素数据(raw)写到该文件
 //!                           （配合 c/scanout-check.py 校验画面非空）
 //!   --require-dmabuf      超时前未收到 DMABUF 或出现 fstat 失败时返回失败
-//!   --require-scanout-map 超时前未收到有效 Map 帧或出现映射失败时返回失败
 //!   --report <path>       退出时写入机器可读的实验报告（JSON）
 //!
-//! 验证判据（见 docs/90-历史记录.md M2.5）：C2 对象树可见 / C3 收到 Scanout|ScanoutMap / C4 收到 ScanoutDMABUF
+//! 验证判据：对象树可见，并持续收到 Scanout 或 ScanoutDMABUF。
 //!
 //! 连接方式参考 QEMU tests/qtest/dbus-display-test.c：
 //!   探针侧以 AUTHENTICATION_CLIENT 身份，QEMU 侧为 AUTHENTICATION_SERVER。
@@ -28,7 +27,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
-use listener::{DmabufExport, ScanoutListener, ScanoutMapListener};
+use listener::{DmabufExport, ScanoutListener};
 
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -90,13 +89,8 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
         export_path,
         export_scanout,
         require_dmabuf,
-        require_scanout_map,
         report_path,
     } = parse_args();
-    let map_mode = std::env::var("VIRTCONSOLE_SCANOUT_MAP").as_deref() == Ok("1");
-    if map_mode {
-        println!("[模式] VIRTCONSOLE_SCANOUT_MAP=1，Listener 将只声明 Unix.Map");
-    }
 
     // 1. 连接 D-Bus（session 或自定义地址，对应 QEMU -display dbus 的两种总线模式）
     let bus = match &bus_addr {
@@ -164,7 +158,7 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
     println!("[5] RegisterListener 调用成功");
 
     // 6. 本地作为 p2p client 建立连接（QEMU 侧为 server），并 serve Listener 接口
-    let mut listener = ScanoutListener::new_with_map_mode(map_mode);
+    let mut listener = ScanoutListener::new();
     // 若指定 --export-dmabuf：启动 Unix socket server，收到 dmabuf 后转发给 EGL 测试程序
     if let Some(sockpath) = &export_path {
         let _ = std::fs::remove_file(sockpath);
@@ -226,15 +220,9 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let stats = listener.stats.clone();
     let frame_counter = listener.frame_counter.clone();
     let listener_path = "/org/qemu/Display1/Listener";
-    let mut builder = zbus::connection::Builder::unix_stream(our_stream)
+    let builder = zbus::connection::Builder::unix_stream(our_stream)
         .p2p()
         .serve_at(listener_path, listener)?;
-    if map_mode {
-        builder = builder.serve_at(
-            listener_path,
-            ScanoutMapListener::new(stats.clone(), frame_counter.clone()),
-        )?;
-    }
     // serve_at makes both interfaces visible before QEMU sends the initial frame.
     let lconn = builder.build().await?;
     println!("[6] Listener 已就绪（p2p D-Bus，path=/org/qemu/Display1/Listener）");
@@ -258,17 +246,10 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
                 }
                 let s = stats.lock().unwrap();
                 println!(
-                    "[统计] 累计 {} 帧 | Scanout={} Update={} Map={} MapUpdate={} valid={} map_fail={} DMABUF={} dup={} close={} fstat_fail={}",
+                    "[统计] 累计 {} 帧 | Scanout={} Update={} DMABUF={} dup={} close={} fstat_fail={}",
                     frame_counter.load(std::sync::atomic::Ordering::Relaxed),
                     s.scans,
                     s.updates,
-                    s.maps,
-                    s.map_updates,
-                    s.map_valid,
-                    s.map_fstat_failures
-                        + s.map_metadata_failures
-                        + s.map_mmap_failures
-                        + s.map_format_failures,
                     s.dmabufs,
                     s.dmabuf_fds_duplicated, s.dmabuf_fds_released, s.dmabuf_fstat_failures
                 );
@@ -285,8 +266,7 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
         }
     }
 
-    // Drop the p2p connection before reading final fd statistics so the retained
-    // Map fd and mmap are released and counted.
+    // Drop the p2p connection before reading final fd statistics.
     drop(lconn);
     let s = stats.lock().unwrap();
     let duration = started.elapsed();
@@ -300,47 +280,14 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
         && s.dmabuf_fstat_failures == 0
         && s.dmabuf_fds_duplicated == s.dmabuf_fds_released
         && no_fd_leak;
-    let map_failures = s.map_fstat_failures
-        + s.map_metadata_failures
-        + s.map_mmap_failures
-        + s.map_format_failures;
-    let map_ok = s.maps > 0
-        && s.map_valid == s.maps
-        && s.map_fds_received == s.maps
-        && s.map_fds_released == s.maps
-        && s.map_fstat_successes == s.maps
-        && map_failures == 0
-        && s.map_empty_frames == 0
-        && (s.maps > 1 || s.map_updates > 0)
-        && no_fd_leak;
     if let Some(path) = report_path {
         let report = format!(
-            "{{\"duration_ms\":{},\"dmabuf_fps\":{:.3},\"map_fps\":{:.3},\"frames\":{},\"scanout\":{},\"update\":{},\"map\":{},\"map_update\":{},\"map_valid\":{},\"map_fds_received\":{},\"map_fds_released\":{},\"map_fstat_successes\":{},\"map_failures\":{},\"map_fstat_failures\":{},\"map_metadata_failures\":{},\"map_mmap_failures\":{},\"map_format_failures\":{},\"map_empty_frames\":{},\"map_bytes_sampled\":{},\"map_offset\":{},\"map_width\":{},\"map_height\":{},\"map_stride\":{},\"map_pixman_format\":{},\"map_checksum\":{},\"dmabuf\":{},\"fd_duplicated\":{},\"fd_released\":{},\"fstat_failures\":{},\"fd_baseline\":{},\"fd_final\":{},\"no_fd_leak\":{},\"dmabuf_liveness\":{},\"map_liveness\":{},\"width\":{},\"height\":{},\"stride\":{},\"fourcc\":{},\"modifier\":{},\"y0_top\":{}}}\n",
+            "{{\"duration_ms\":{},\"dmabuf_fps\":{:.3},\"frames\":{},\"scanout\":{},\"update\":{},\"dmabuf\":{},\"fd_duplicated\":{},\"fd_released\":{},\"fstat_failures\":{},\"fd_baseline\":{},\"fd_final\":{},\"no_fd_leak\":{},\"dmabuf_liveness\":{},\"width\":{},\"height\":{},\"stride\":{},\"fourcc\":{},\"modifier\":{},\"y0_top\":{}}}\n",
             duration.as_millis(),
             dmabuf_fps,
-            s.maps as f64 / duration.as_secs_f64().max(0.001),
             frame_counter.load(std::sync::atomic::Ordering::Relaxed),
             s.scans,
             s.updates,
-            s.maps,
-            s.map_updates,
-            s.map_valid,
-            s.map_fds_received,
-            s.map_fds_released,
-            s.map_fstat_successes,
-            map_failures,
-            s.map_fstat_failures,
-            s.map_metadata_failures,
-            s.map_mmap_failures,
-            s.map_format_failures,
-            s.map_empty_frames,
-            s.map_bytes_sampled,
-            s.map_last_offset,
-            s.map_last_width,
-            s.map_last_height,
-            s.map_last_stride,
-            s.map_last_pixman_format,
-            s.map_last_checksum,
             s.dmabufs,
             s.dmabuf_fds_duplicated,
             s.dmabuf_fds_released,
@@ -349,7 +296,6 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
             fd_final.unwrap_or(0),
             no_fd_leak,
             dmabuf_ok,
-            map_ok,
             s.last_width, s.last_height, s.last_stride, s.last_fourcc,
             s.last_modifier, s.last_y0_top
         );
@@ -359,13 +305,6 @@ async fn run() -> Result<u8, Box<dyn std::error::Error>> {
     if require_dmabuf && !dmabuf_ok {
         eprintln!("[失败] --require-dmabuf 验收未通过：未收到有效 DMABUF 或 fd 生命周期异常");
         return Ok(3);
-    }
-    if require_scanout_map && !map_ok {
-        eprintln!(
-            "[失败] --require-scanout-map 验收未通过：maps={} valid={} failures={} empty={} map_updates={} no_fd_leak={}",
-            s.maps, s.map_valid, map_failures, s.map_empty_frames, s.map_updates, no_fd_leak
-        );
-        return Ok(4);
     }
     Ok(0)
 }
@@ -385,7 +324,6 @@ struct Args {
     export_path: Option<String>,
     export_scanout: Option<String>,
     require_dmabuf: bool,
-    require_scanout_map: bool,
     report_path: Option<String>,
 }
 
@@ -398,7 +336,6 @@ fn parse_args() -> Args {
     let mut export = None;
     let mut export_scanout = None;
     let mut require_dmabuf = false;
-    let mut require_scanout_map = false;
     let mut report_path = None;
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -408,7 +345,6 @@ fn parse_args() -> Args {
             "--export-dmabuf" => export = args.next(),
             "--export-scanout" => export_scanout = args.next(),
             "--require-dmabuf" => require_dmabuf = true,
-            "--require-scanout-map" => require_scanout_map = true,
             "--report" => report_path = args.next(),
             _ => {}
         }
@@ -420,7 +356,6 @@ fn parse_args() -> Args {
         export_path: export,
         export_scanout,
         require_dmabuf,
-        require_scanout_map,
         report_path,
     }
 }

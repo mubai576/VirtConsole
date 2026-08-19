@@ -27,7 +27,6 @@ VirtConsole/
 │   │   ├── input.rs          # 输入 sink 选择：D-Bus 可用走 D-Bus，否则 QMP
 │   │   └── pve.rs config.rs term.rs browser.rs testmode.rs
 │   ├── web/                  # 前端（Vite + React，在用；package.json 在这里，不在仓库根）
-│   ├── frontend/             # 旧前端（纯 HTML/JS，P5 通过后删）
 │   ├── dist/                 # 前端构建产物（不提交，frontendDist 指向它）
 │   └── tauri.conf.json
 ├── deploy/                   # systemd 服务单元（weston + dbus + 应用）

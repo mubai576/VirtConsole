@@ -2,7 +2,7 @@
  *
  * 测试契约：保留旧前端选择器 `#tabbar .tab.focus`（helpers.js 依赖），
  * 故每项同时带 miuix 类（mx-navitem）与旧类（tab / focus / active）。
- * 改动这些类名必须同步 ui/frontend/test/helpers.js，见方案 §3.2。
+ * 改动这些类名必须同步 ui/web/src/test/helpers.js，见方案 §3.2。
  *
  * items: [{ id, label, badge }]
  */

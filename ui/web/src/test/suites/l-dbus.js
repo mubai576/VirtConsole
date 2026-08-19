@@ -116,8 +116,7 @@ export const suiteL = {
       await unlistenSize();
       console.log(`[VC-TEST] 收到 ${frames.length} 帧`);
       const nativeMode = typeof startResult === "string" && (
-        startResult.includes("ScanoutMap native overlay") ||
-        startResult.includes("Wayland DMABUF direct import")
+      startResult.includes("Wayland DMABUF direct import")
       );
       if (nativeMode) {
         assert(frames.length === 0, `native overlay 不应发送像素 vm-frame，实际收到 ${frames.length} 帧`);

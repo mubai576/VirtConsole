@@ -29,5 +29,4 @@ futures-util = "0.3"
 # dbus-display 采集仅 Linux 目标使用（zbus 已在通用依赖，这里仅为文档化）
 gtk = "0.18"
 glib = "0.18"
-cairo-rs = "0.18"
 gdkwayland-sys = "0.18"
