@@ -68,7 +68,7 @@ journalctl -u virtconsole -f
 
 ```bash
 cargo test --workspace                # 单测 42（vc-ui）+ 7（qmp-engine）
-VIRTCONSOLE_TEST=1 cargo run -p vc-ui # 全流程 E2E：Windows 88/88 实测 / 14 套件（真机待 P5 重测）
+VIRTCONSOLE_TEST=1 cargo run -p vc-ui # 全流程 E2E：Windows 90/90 实测 / 14 套件（真机待 P5 重测）
 echo "exit=$?"                        # 0 全过 / 1 有失败 / 2 看门狗超时
 ```
 

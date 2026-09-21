@@ -358,6 +358,8 @@
 .badge.paused { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .badge.stopped { background: var(--divider); color: var(--on-surface-secondary); }
 .badge.starting { background: var(--accent-weak); color: var(--primary); }
+/* 模式徽章（实体页头，可点进控制台）：中性强调色，与状态徽章区分 */
+.badge.mode-badge { background: var(--accent-weak); color: var(--primary); }
 
 /* ===== 按钮（视图内的 .btn；miuix 组件层的按钮见 ui/ui.css 的 .vc-btn） ===== */
 .btn {

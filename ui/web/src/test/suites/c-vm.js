@@ -1,6 +1,6 @@
 // 套件 C：虚拟机（列表 + 实体页）
 import { invoke } from "../../shared.js";
-import { step, key, wait, flush, assert, click, q, qa, activeTabId, goHome } from "../framework.js";
+import { step, key, wait, flush, assert, click, q, qa, activeTabId, goHome, ctrlAltQ, consoleVisible } from "../framework.js";
 import { ensureVmList, openVmEntity } from "../helpers.js";
 
 export const suiteC = {
@@ -71,6 +71,28 @@ export const suiteC = {
       assert(grid.includes("模式 2"), "模式 2 徽标缺失");
       const btn = q("#vm-enter-capture");
       assert(!!btn, "进入采集按钮缺失");
+      await goHome();
+    });
+    await step("C9c_mode_badge_clickable", async () => {
+      await openVmEntity(1, 0);
+      const badge = q("#vm-mode-badge");
+      assert(!!badge, "模式徽标缺失");
+      assert(badge.dataset.capture === "dbus", `徽标选路=${badge.dataset.capture}`);
+      click(badge);
+      await flush(250);
+      // 概览入口只起采集不进层：仍在实体页，且单高亮不变量由 step 收尾校验
+      assert(!!q(".subnav-item"), "点击徽标后离开实体页");
+      await goHome();
+    });
+    await step("C9d_head_mode_badge_enters_console", async () => {
+      await openVmEntity(1, 0);
+      const head = q("#vm-mode-badge-head");
+      assert(!!head, "页头模式徽章缺失");
+      click(head);
+      await flush(400);
+      assert(consoleVisible(), "页头徽章未进入沉浸层");
+      ctrlAltQ(); await flush(150);
+      assert(!consoleVisible(), "Ctrl+Alt+Q 未退出");
       await goHome();
     });
     await step("C10_ops_button_nav", async () => {

@@ -461,6 +461,10 @@ export default function Vm({ consoleRef }) {
   }
 
   const isMonitorOrTerm = sub === 1 || (entity.kind === "host" && sub === 2);
+  // 页头模式徽章：VM 且详情已载入时显示（短标签如“模式 2”），点击走 console 全入口
+  const headWantCap = detail?.capture_dbus ?? detail?.mode?.includes("模式 2") ?? false;
+  const headIsM1 = detail?.mode?.includes("模式 1") ?? false;
+  const headModeLabel = detail?.mode?.match(/模式 \d/)?.[0] ?? detail?.mode;
 
   return (
     <div id="vm-root">
@@ -470,6 +474,20 @@ export default function Vm({ consoleRef }) {
           {entity.kind === "host" ? "宿主机 · " + entity.node : entity.name}
         </div>
         <StatusBadge status={entity.status} />
+        {/* 模式徽章可点击化（V2.0）：VM 且详情已载入时显示，点击走 Ops console 同款全入口。
+            鼠标 affordance，不进焦点环（键盘走概览/操作的内容项）。 */}
+        {entity.kind === "vm" && detail && (
+          <span
+            id="vm-mode-badge-head"
+            className="badge mode-badge"
+            data-capture={headWantCap ? "dbus" : headIsM1 ? "qmp" : "none"}
+            title={headWantCap || headIsM1 ? "点击进入控制台" : "该模式暂无采集链路"}
+            style={headWantCap || headIsM1 ? { cursor: "pointer" } : undefined}
+            onClick={() => doAction("console")}
+          >
+            {headModeLabel}
+          </span>
+        )}
       </div>
 
       <nav className="subnav">
