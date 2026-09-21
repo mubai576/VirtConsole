@@ -34,5 +34,3 @@ pub async fn vm_input_text(state: tauri::State<'_, QmpState>, text: String) -> R
 pub async fn vm_status(state: tauri::State<'_, QmpState>) -> Result<String, String> {
     Ok(crate::qmp::status(&state).await)
 }
-
-// ===== V2.0 dbus-display 采集 =====

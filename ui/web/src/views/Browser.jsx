@@ -57,6 +57,8 @@ export default function Browser() {
   }, []);
 
   // addr 区独占真实 DOM 焦点；离开时必须 blur，否则按键仍进输入框
+  // 注意：hover 会 blur 输入框（打字中鼠标划过即中断输入）。B7 契约要求
+  // hover 与键盘共用同一 .focused 高亮，故保留此行为；typing 中断记为已知问题（见 02/T10）。
   const toAddr = () => {
     setZone("addr");
     setTimeout(() => addrRef.current?.focus(), 0);

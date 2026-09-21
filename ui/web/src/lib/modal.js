@@ -106,9 +106,10 @@ export function showInput({ title, initial = "", kind = "text", confirmText = "�
     const btns = ov.querySelectorAll("button");
     const done = (v) => { closeModal(ov); resolve(v); };
     // 焦点常驻输入框：Enter 提交 / Esc 取消；其余按键直通并屏蔽全局路由
+    // Enter/Esc 也 stopPropagation：否则冒泡到 FocusProvider 会再触发底层导航（H7 精神）
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); done(input.value); return; }
-      if (e.key === "Escape") { e.preventDefault(); done(null); return; }
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(input.value); return; }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); return; }
       e.stopPropagation();
     });
     btns[1].addEventListener("click", () => done(input.value));

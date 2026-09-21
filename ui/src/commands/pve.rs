@@ -1,6 +1,6 @@
 //! PVE 集群命令（实体列表、VM 操作、快照、监控指标）
 
-use crate::PveState;
+use crate::pve::PveState;
 use serde_json::json;
 use tauri::Emitter;
 
@@ -192,5 +192,3 @@ pub async fn pve_vm_rrd(
 pub async fn pve_gpu_metrics() -> Option<crate::pve::GpuMetrics> {
     crate::pve::PveClient::gpu_metrics().await
 }
-
-// ===== 终端 =====

@@ -3,10 +3,27 @@
 //! 鉴权双支持：API Token（`Authorization: PVEAPIToken=...`）或 用户名密码
 //! （`POST /access/ticket` 取 ticket + CSRF）。开发机可用 `mock://` 主机离线联调。
 
+use std::sync::Arc;
+
 use serde::Serialize;
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
 
 use crate::config::PveAuth;
+
+/// PVE 客户端状态（单连接，串行化复用）。住在此处而非 lib.rs：
+/// lib.rs 只做装配，业务状态归业务模块。
+pub struct PveState {
+    pub client: Arc<Mutex<Option<PveClient>>>,
+}
+
+impl Default for PveState {
+    fn default() -> Self {
+        Self {
+            client: Arc::new(Mutex::new(None)),
+        }
+    }
+}
 
 #[derive(Serialize, Clone)]
 pub struct Entity {

@@ -1,7 +1,9 @@
 /** 实体列表（宿主机 + 各 VM）。
  *  测试契约：`#vm-entities .erow`，首行为宿主机（套件 C1）。
+ *  空态带 [去设置] 引导按钮（规范“重试或引导”）。
  */
 import { fmtBytes, fmtPct } from "../../lib/format.js";
+import { useFocusShell } from "../../focus/FocusProvider.jsx";
 import StatusBadge from "./StatusBadge.jsx";
 
 function entitySub(e) {
@@ -11,6 +13,7 @@ function entitySub(e) {
 }
 
 export default function EntityList({ entities, idx, hasFocus, onPick, onHover, onRefresh }) {
+  const { activate } = useFocusShell();
   if (!entities.length) {
     return (
       <div className="empty-state">
@@ -19,6 +22,14 @@ export default function EntityList({ entities, idx, hasFocus, onPick, onHover, o
         <div className="e-desc">
           请到「设置 → PVE 连接」配置连接。开发机未配置时默认进入 Mock 模式（示例数据）。
         </div>
+        <button
+          type="button"
+          id="vm-empty-settings"
+          className="btn btn-primary"
+          onClick={() => activate("settings")}
+        >
+          去设置
+        </button>
       </div>
     );
   }

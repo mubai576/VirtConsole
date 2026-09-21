@@ -126,6 +126,8 @@ const ConsoleLayer = forwardRef(function ConsoleLayer(_props, ref) {
     // 守卫见套件 I2_layer_covers_viewport。
     <div id="console-layer" className={`console-layer${visible ? "" : " hidden"}`}>
       <canvas id="vm-canvas" ref={canvasRef} onClick={refocus} style={{ objectFit: fitRef.current }} />
+      {/* 沉浸层唯一退出键提示：样式复用 views.css 的 .console-hint（此前有样式无元素） */}
+      <div className="console-hint">Ctrl+Alt+Q 返回</div>
     </div>
   );
 });

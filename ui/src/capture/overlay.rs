@@ -34,6 +34,7 @@ enum WaylandCommand {
         height: i32,
     },
     Hide,
+    Destroy,
 }
 
 unsafe extern "C" {
@@ -66,6 +67,7 @@ unsafe extern "C" {
     );
     fn vc_dmabuf_overlay_resize(overlay: *mut libc::c_void, width: i32, height: i32);
     fn vc_dmabuf_overlay_hide(overlay: *mut libc::c_void);
+    fn vc_dmabuf_overlay_destroy(overlay: *mut libc::c_void);
 }
 
 impl WaylandDmabufOverlay {
@@ -90,6 +92,13 @@ impl WaylandDmabufOverlay {
 
     pub fn hide(&self) {
         let _ = self.tx.send(WaylandCommand::Hide);
+    }
+
+    /// 销毁 C 侧 overlay（GTK 主线程执行）。
+    /// 注意：`session::stop` 故意只 hide 不 destroy —— overlay 跨采集会话复用，
+    /// 进程退出由 OS 回收。此方法供未来显式 teardown 路径使用。
+    pub fn destroy(&self) {
+        let _ = self.tx.send(WaylandCommand::Destroy);
     }
 }
 
@@ -196,6 +205,9 @@ pub async fn create_wayland_dmabuf<R: Runtime>(
                         },
                         WaylandCommand::Hide => unsafe {
                             vc_dmabuf_overlay_hide(overlay);
+                        },
+                        WaylandCommand::Destroy => unsafe {
+                            vc_dmabuf_overlay_destroy(overlay);
                         },
                     }
                     glib::ControlFlow::Continue

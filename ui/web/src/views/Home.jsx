@@ -87,6 +87,13 @@ export default function Home({ consoleRef }) {
         back();
         return true;
       }
+      // ↓ 在卡片/快捷两行之间跳转（此前无反应，内容区四向应可达）
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (idx < tiles.length) setIdx(tiles.length);
+        else setIdx(0);
+        return true;
+      }
       return false;
     },
   });

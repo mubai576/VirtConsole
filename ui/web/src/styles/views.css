@@ -110,7 +110,7 @@
 .row-item.focused {
   border-color: var(--primary);
   box-shadow: var(--ring), var(--shadow);
-  transform: scale(1.03);
+  transform: scale(var(--focus-scale));
 }
 
 /* ===== 首页 ===== */
@@ -377,7 +377,7 @@
 .btn-primary { background: var(--primary); color: var(--on-primary); }
 .btn-danger { background: var(--error); color: var(--on-error); }
 .btn-ghost { background: var(--surface); color: var(--on-background); border-color: var(--divider); }
-.btn.focused { box-shadow: var(--ring); transform: scale(1.04); }
+.btn.focused { box-shadow: var(--ring); transform: scale(var(--focus-scale)); }
 .btn:disabled { opacity: 0.4; }
 
 /* ===== 模态对话框（命令式，见 lib/modal.js） ===== */
@@ -483,7 +483,7 @@
   cursor: default;
   transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
 }
-.erow.focused { border-color: var(--primary); box-shadow: var(--ring); transform: scale(1.01); }
+.erow.focused { border-color: var(--primary); box-shadow: var(--ring); transform: scale(var(--focus-scale)); }
 .erow .e-name { font-size: var(--fs-body1); font-weight: var(--fw-medium); }
 .erow .e-sub { font-size: var(--fs-footnote1); color: var(--on-surface-variant-summary); margin-top: 0.25rem; }
 .erow .e-right { margin-left: auto; display: flex; align-items: center; gap: 1.5rem; }
@@ -590,7 +590,7 @@
 .mon-cards .info-cell.focused {
   border-color: var(--primary);
   box-shadow: var(--ring);
-  transform: scale(1.03);
+  transform: scale(var(--focus-scale));
 }
 .mon-chart {
   margin-top: 2rem;

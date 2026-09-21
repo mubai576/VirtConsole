@@ -490,13 +490,13 @@ export default function Vm({ consoleRef }) {
         )}
       </div>
 
+      {/* 二级导航只响应点击：hover 切 setSub 会重建监控轮询/终端会话；键盘环不受影响 */}
       <nav className="subnav">
         {subNav.map((s, i) => (
           <div
             key={s}
             className={"subnav-item" + (sub === i ? " active" : "") + (navFocused && sub === i ? " focused" : "")}
             onClick={() => { setSub(i); setRow("nav"); }}
-            onMouseEnter={() => { setSub(i); setRow("nav"); }}
           >
             {s}
           </div>

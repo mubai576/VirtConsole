@@ -1,4 +1,4 @@
-//! SSH 终端命令
+//! 本地 shell 终端命令（宿主 PTY，非 SSH；VM 串口待 V2.0+）
 
 use crate::terminal::TermState;
 #[tauri::command]

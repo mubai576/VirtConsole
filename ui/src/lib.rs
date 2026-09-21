@@ -1,13 +1,9 @@
 //! VirtConsole Tauri 主界面入口。
 //!
-//! 这里**只做装配**：声明模块、定义跨模块共享的 State、把命令注册进
+//! 这里**只做装配**：声明模块、注册各模块的 State、把命令注册进
 //! `invoke_handler`。命令实现全部在 [`commands`] 下按业务域分文件
 //! （原先 659 行里塞了 40+ 个命令，改一处得先确认没碰到别人的）。
-
-use std::sync::Arc;
-
-use tauri::Manager;
-use tokio::sync::Mutex;
+//! 业务状态住在业务模块（如 `pve::PveState`），此处只引用。
 
 mod browser;
 // 不挂 cfg(unix)：capture::keymap / capture::frame 是纯计算，两平台都编译并跑
@@ -24,21 +20,9 @@ mod testmode;
 use browser::BrowserState;
 #[cfg(unix)]
 use capture::CaptureState;
+use pve::PveState;
 use qmp::QmpState;
 use terminal::TermState;
-
-/// PVE 客户端状态（单连接，串行化复用）
-pub struct PveState {
-    pub client: Arc<Mutex<Option<pve::PveClient>>>,
-}
-
-impl Default for PveState {
-    fn default() -> Self {
-        Self {
-            client: Arc::new(Mutex::new(None)),
-        }
-    }
-}
 
 /// 注册 dbus-display 采集状态（仅 Linux）
 #[cfg(unix)]
@@ -66,18 +50,7 @@ pub fn run() {
     builder
         .setup(|app| {
             testmode::spawn_watchdog();
-            // 验证/演示钩子：VIRTCONSOLE_BROWSER_AUTOOPEN 指定启动后自动打开的网址
-            if let Ok(url) = std::env::var("VIRTCONSOLE_BROWSER_AUTOOPEN") {
-                let app_handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    let state = app_handle.state::<BrowserState>();
-                    match browser::open(&app_handle, &state, url) {
-                        Ok(label) => eprintln!("[浏览器] 自动打开成功: {label}"),
-                        Err(e) => eprintln!("[浏览器] 自动打开失败: {e}"),
-                    }
-                });
-            }
+            browser::maybe_autoopen(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

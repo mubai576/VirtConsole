@@ -116,5 +116,3 @@ pub async fn capture_mouse_button(
     }
     crate::capture::mouse_button(&state, button, down).await
 }
-
-// ===== 配置 =====

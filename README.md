@@ -16,7 +16,7 @@ V1.0 与 V2.0 已在真机部署验证；V3.0（miuix 重构）P0–P4 完成，
 VirtConsole/
 ├── Cargo.toml                # Rust workspace
 ├── docs/                     # 全部文档，入口是 00-索引.md
-├── host/                     # 最简渲染层（winit + softbuffer，Mock / 回退用）
+├── host/                     # 已退役的 M1 色条终端（留目录备查，不在 workspace 内）
 ├── qmp-engine/               # QMP 引擎（VM 状态/启停/键鼠投递/screendump）
 │   ├── src/lib.rs
 │   └── examples/probe.rs     # 连接探针

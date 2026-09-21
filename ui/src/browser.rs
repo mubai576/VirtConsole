@@ -40,6 +40,22 @@ fn next_label() -> String {
     format!("browser-{ms}")
 }
 
+/// 验证/演示钩子：`VIRTCONSOLE_BROWSER_AUTOOPEN` 指定启动后自动打开的网址。
+/// 住在此处而非 lib.rs setup：装配层不含窗口业务。
+pub fn maybe_autoopen(app: &AppHandle) {
+    if let Ok(url) = std::env::var("VIRTCONSOLE_BROWSER_AUTOOPEN") {
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let state = app_handle.state::<BrowserState>();
+            match open(&app_handle, &state, url) {
+                Ok(label) => eprintln!("[浏览器] 自动打开成功: {label}"),
+                Err(e) => eprintln!("[浏览器] 自动打开失败: {e}"),
+            }
+        });
+    }
+}
+
 /// 打开一个新标签页（独立 Webview 窗口）
 pub fn open(app: &AppHandle, state: &BrowserState, url: String) -> Result<String, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("URL 无效: {url}"))?;

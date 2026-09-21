@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["host", "qmp-engine", "ui"]
+# host 已退役（M1 色条终端，无部署消费者，见 00-索引）：留目录备查，不再参与统一构建
+members = ["qmp-engine", "ui"]
 
 [profile.release]
 opt-level = 2

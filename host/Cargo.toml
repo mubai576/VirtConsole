@@ -9,3 +9,6 @@ winit = "0.30"
 softbuffer = "0.4"
 qmp-engine = { path = "../qmp-engine" }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+
+# 已退役：独立 workspace，脱离根统一构建，留目录备查
+[workspace]
