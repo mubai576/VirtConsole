@@ -796,7 +796,11 @@ mod tests {
     async fn mock_detail_covers_three_modes() {
         let c = mock_client();
         let m1 = c.vm_detail(100).await.unwrap();
-        assert!(m1.mode.contains("模式 1"), "vmid 100 应为模式 1，实得 {}", m1.mode);
+        assert!(
+            m1.mode.contains("模式 1"),
+            "vmid 100 应为模式 1，实得 {}",
+            m1.mode
+        );
         assert!(!m1.capture_dbus);
         assert!(!m1.dbus_enabled);
         let m2 = c.vm_detail(9000).await.unwrap();
@@ -804,7 +808,11 @@ mod tests {
         assert!(m2.capture_dbus);
         assert!(m2.dbus_enabled);
         let m3 = c.vm_detail(200).await.unwrap();
-        assert!(m3.mode.contains("模式 3"), "vmid 200 应为模式 3，实得 {}", m3.mode);
+        assert!(
+            m3.mode.contains("模式 3"),
+            "vmid 200 应为模式 3，实得 {}",
+            m3.mode
+        );
         assert!(!m3.capture_dbus);
         assert!(!m3.dbus_enabled);
     }

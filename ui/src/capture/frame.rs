@@ -154,7 +154,12 @@ pub fn push_frame(
             let b64 = B64.encode(&f.rgb);
             let dt = t0.elapsed();
             if dt.as_millis() > 16 {
-                eprintln!("[capture] full-frame encode slow: {}x{} {}KiB b64 in {dt:?}", f.width, f.height, b64.len() / 1024);
+                eprintln!(
+                    "[capture] full-frame encode slow: {}x{} {}KiB b64 in {dt:?}",
+                    f.width,
+                    f.height,
+                    b64.len() / 1024
+                );
             }
             let _ = app.emit(
                 "vm-frame",
@@ -170,7 +175,10 @@ pub fn push_frame(
                 let b64 = B64.encode(&rgb);
                 let dt = t0.elapsed();
                 if dt.as_millis() > 16 {
-                    eprintln!("[capture] dirty encode slow: {w}x{h} {}KiB b64 in {dt:?}", b64.len() / 1024);
+                    eprintln!(
+                        "[capture] dirty encode slow: {w}x{h} {}KiB b64 in {dt:?}",
+                        b64.len() / 1024
+                    );
                 }
                 let _ = app.emit(
                     "vm-frame",
