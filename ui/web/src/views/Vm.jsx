@@ -242,17 +242,22 @@ export default function Vm({ consoleRef }) {
     const vmid = e.vmid;
 
     if (op === "console") {
-      await consoleRef.current?.enter(vmid);
-      return;
-    }
-    if (op === "dbus") {
+      // T4 合并入口：按 capture_dbus 自动选路（缺字段回退 mode 文案）。
       // 采集与进层的顺序由 enter 内部保证（方案 §5.1 第 1 条），
       // 采集失败也照样进层：键盘会走 QMP 回退，只是没有像素流。
-      await consoleRef.current?.enter(vmid, { capture: true });
+      const d = live.current.detail;
+      const wantCapture = d?.capture_dbus ?? d?.mode?.includes("模式 2") ?? false;
+      const isMode1 = d?.mode?.includes("模式 1") ?? false;
+      if (!wantCapture && !isMode1) {
+        toast("该 VM 为直通模式，暂无采集链路（V3.0 满血版）");
+        return;
+      }
+      await consoleRef.current?.enter(vmid, { capture: wantCapture });
       return;
     }
-    if (op === "enable-dbus" || op === "disable-dbus") {
-      const enable = op === "enable-dbus";
+    if (op === "dbus-toggle") {
+      // 二选一：已启用则走禁用，反之走启用。detail 缺失时默认走启用（无损，可再切回来）。
+      const enable = !live.current.detail?.dbus_enabled;
       const ok = await showConfirm({
         title: enable ? "启用 dbus 画面采集" : "禁用 dbus 画面采集",
         desc: enable
@@ -496,6 +501,7 @@ export default function Vm({ consoleRef }) {
               onOp={doAction}
               onSnapshot={snapshotAction}
               onHover={(i) => { setRow("content"); setCidx(i); }}
+              dbusEnabled={detail?.dbus_enabled ?? false}
             />
           )
         )}

@@ -1,7 +1,8 @@
-/** 设置：主题 / 显示缩放 / 画面采集 / PVE / 开机直连 / 手机遥控 / 系统信息 / 关于。
+/** 设置：主题 / 显示缩放 / 画面采集 / PVE / 开机直连 / 系统信息。
  *
  * 测试契约（套件 G/H）：`#settings-list .row-item` 的顺序与数量（helpers.settingsActivateRow
- * 按下标点击：0 主题、1 缩放、2 采集、3 PVE、4 开机直连、6 系统信息）。
+ * 按下标点击：0 主题、1 缩放、2 采集、3 PVE、4 开机直连、5 系统信息）。
+ * T5 落定：手机遥控（仅 toast 占位）与关于（与系统信息重复）已删。
  * 行值走 500ms 轮询改为派生渲染 —— 主题切换后 state 变化即刷新，无需定时器。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -195,9 +196,7 @@ export default function Settings({ consoleRef }) {
     { label: "画面采集", value: `${capFps} fps · ${CAP_SCALE_LABELS[capScale] || capScale}`, enter: configCapture },
     { label: "PVE 连接", value: pveHost || "未配置", enter: configPve },
     { label: "开机直连", value: autoVmid ? `VM ${autoVmid}` : "关闭", enter: configAutoconnect },
-    { label: "手机遥控", value: "V1.0 未实现 · 设计保留", enter: () => toast("手机遥控（V1.0 不实现）") },
     { label: "系统信息", value: "版本 / 平台 / 采集 / 连接", enter: showSysInfo },
-    { label: "关于", value: "VirtConsole 自研 PVE 终端", enter: () => toast("VirtConsole · 自研 PVE 一体化 HDMI 终端") },
   ];
   const [idx, setIdx, move] = useRingIndex(rows.length);
   const rowsRef = useRef(rows);

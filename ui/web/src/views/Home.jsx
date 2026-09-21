@@ -39,8 +39,14 @@ export default function Home({ consoleRef }) {
   }, [load, activeId]);
 
   // 一维焦点环：VM 卡片 + 快捷项
+  // 控制台快捷按运行中优先选目标（mock 下即 VM 9000，I/L7 套件行为不变），不再写死 vmid
+  const consoleTarget =
+    vms.find((v) => v.status === "running")?.vmid ?? vms[0]?.vmid ?? null;
   const quicks = [
-    { label: "VM 9000 控制台", action: () => consoleRef.current?.enter(9000) },
+    {
+      label: consoleTarget ? `VM ${consoleTarget} 控制台` : "VM 控制台",
+      action: () => { if (consoleTarget) consoleRef.current?.enter(consoleTarget); else activate("vm"); },
+    },
     { label: "内置浏览器", action: () => activate("browser") },
     { label: "设置", action: () => activate("settings") },
   ];

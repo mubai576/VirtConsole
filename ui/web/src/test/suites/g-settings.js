@@ -94,7 +94,7 @@ export const suiteG = {
       await goHome();
     });
     await step("G10_system_info_modal", async () => {
-      await settingsActivateRow(6);
+      await settingsActivateRow(5);
       const modal = q(".modal");
       assert(!!modal && modal.querySelector(".info-grid"), "信息弹窗未开");
       key("Escape"); await flush(60);

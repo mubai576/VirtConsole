@@ -9,11 +9,11 @@ import { invoke, listen } from "../lib/ipc.js";
 import { setCrumb, setHint, toast } from "../lib/uiStore.js";
 import { useViewKeys } from "../focus/useFocusable.js";
 
+// T4 落定：写死 vmid 的网页控制台与 example.com 占位已删。VM 网页控制台改走
+// 虚拟机 Tab 的实体页（PVE 后台内同样可进），不在此处逐 VM 硬编码。
 const QUICK_LINKS = [
   { label: "PVE 后台", url: "https://192.168.0.20:8006" },
-  { label: "VM 9000 网页控制台", url: "https://192.168.0.20:8006/?console=kvm&vmid=9000" },
   { label: "局域网网关", url: "http://192.168.0.1" },
-  { label: "示例站", url: "https://example.com" },
 ];
 
 async function openUrl(raw) {

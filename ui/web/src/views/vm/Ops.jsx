@@ -3,6 +3,8 @@
  * 测试契约：`#vm-ops-row .btn` 的顺序（套件 C/H 按下标点击：
  * 1 优雅关机、4 强制停止、5 新建快照）与 `#vm-snapshots .vrow`。
  * 内容焦点是一维序列：ops 在前、快照在后（cidx 贯通两段）。
+ * T4 重构后 7 键：0 进入控制台（按 capture_dbus 自动选路）、6 dbus 启用/禁用二选一。
+ * 0–5 下标与合并前一致，C/H 套件无需改动。
  */
 export const OPS = [
   { op: "console", label: "进入控制台", cls: "btn-primary" },
@@ -11,13 +13,12 @@ export const OPS = [
   { op: "start", label: "启动", cls: "btn-ghost" },
   { op: "stop", label: "强制停止", cls: "btn-danger" },
   { op: "snap", label: "新建快照", cls: "btn-ghost" },
-  { op: "dbus", label: "dbus 画面采集", cls: "btn-ghost" },
-  { op: "enable-dbus", label: "启用 dbus 采集", cls: "btn-ghost" },
-  { op: "disable-dbus", label: "禁用 dbus 采集", cls: "btn-ghost" },
+  { op: "dbus-toggle", label: "dbus 采集", cls: "btn-ghost" },
 ];
 
-export default function Ops({ snapshots, cidx, contentFocused, onOp, onSnapshot, onHover }) {
+export default function Ops({ snapshots, cidx, contentFocused, onOp, onSnapshot, onHover, dbusEnabled }) {
   const mark = (i) => (contentFocused && cidx === i ? " focused" : "");
+  const labelFor = (o) => (o.op === "dbus-toggle" ? (dbusEnabled ? "禁用 dbus 采集" : "启用 dbus 采集") : o.label);
   return (
     <>
       <div className="panel-title">操作</div>
@@ -31,7 +32,7 @@ export default function Ops({ snapshots, cidx, contentFocused, onOp, onSnapshot,
             onClick={() => { onHover(i); onOp(o.op); }}
             onMouseEnter={() => onHover(i)}
           >
-            {o.label}
+            {labelFor(o)}
           </button>
         ))}
       </div>

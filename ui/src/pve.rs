@@ -34,6 +34,8 @@ pub struct VmDetail {
     pub mode: String,
     /// 进入控制台时是否应先起 dbus 采集（仅模式 2 true）。前端按此自动选路，不再让人手选 console/dbus。
     pub capture_dbus: bool,
+    /// VM 配置 `args` 是否已含 dbus-display（即启用采集后）。前端据此二选一显示启用/禁用按钮。
+    pub dbus_enabled: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -247,6 +249,12 @@ impl PveClient {
             .unwrap_or(false);
         let mode = mode_label(&vga, has_hostpci);
         let capture_dbus = should_capture(&vga, has_hostpci);
+        // `args` 含 dbus-display 即已启用采集（与 vm_enable_dbus 写入的 `-display dbus` 同源）
+        let dbus_enabled = c
+            .get("args")
+            .and_then(Value::as_str)
+            .map(|a| a.contains("dbus"))
+            .unwrap_or(false);
         Ok(VmDetail {
             vmid,
             name: c["name"].as_str().unwrap_or("").to_string(),
@@ -260,6 +268,7 @@ impl PveClient {
             vga,
             mode,
             capture_dbus,
+            dbus_enabled,
         })
     }
 
@@ -635,7 +644,8 @@ impl PveClient {
                 let (vga, extra) = match vmid {
                     100 => ("std", json!({})),
                     200 => ("virtio", json!({"hostpci0": "0000:01:00"})),
-                    _ => ("virtio", json!({})),
+                    // 9000 是 dbus 已启用 VM（与 vm_enable_dbus 写入的 args 同形）
+                    _ => ("virtio", json!({"args": "-display dbus"})),
                 };
                 // memory 用字符串模拟真实 PVE 行为
                 let mut data = json!({"name":"Ubuntu 桌面","cores":4,"memory":"8192","vga":vga,"virtio0":"local-lvm:vm-9000-disk-0,size=32G"});
@@ -748,9 +758,11 @@ mod tests {
             vga: "virtio".into(),
             mode: "模式 2 · 像素流 60fps（V2.0）".into(),
             capture_dbus: true,
+            dbus_enabled: true,
         };
         let v = serde_json::to_value(&d).unwrap();
         assert_eq!(v["capture_dbus"], serde_json::json!(true));
+        assert_eq!(v["dbus_enabled"], serde_json::json!(true));
     }
 
     #[test]
@@ -777,6 +789,7 @@ mod tests {
         assert_eq!(d.status, "running");
         assert!(d.mode.contains("模式 2"));
         assert!(d.capture_dbus);
+        assert!(d.dbus_enabled);
     }
 
     #[tokio::test]
@@ -785,12 +798,15 @@ mod tests {
         let m1 = c.vm_detail(100).await.unwrap();
         assert!(m1.mode.contains("模式 1"), "vmid 100 应为模式 1，实得 {}", m1.mode);
         assert!(!m1.capture_dbus);
+        assert!(!m1.dbus_enabled);
         let m2 = c.vm_detail(9000).await.unwrap();
         assert!(m2.mode.contains("模式 2"));
         assert!(m2.capture_dbus);
+        assert!(m2.dbus_enabled);
         let m3 = c.vm_detail(200).await.unwrap();
         assert!(m3.mode.contains("模式 3"), "vmid 200 应为模式 3，实得 {}", m3.mode);
         assert!(!m3.capture_dbus);
+        assert!(!m3.dbus_enabled);
     }
 
     #[tokio::test]
