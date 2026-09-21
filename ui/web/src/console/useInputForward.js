@@ -74,9 +74,28 @@ export function setHidMouseEnabled(enabled) {
   hidMouseEnabled = !!enabled;
 }
 
+// T3↔T10 测量探针：只计数计时，不改行为。真机用量看瓶颈在合成器/IPC 哪一侧。
+// __vcMouseProbe() → { moves, ipcCalls, ipcErrors, coalesced, lastIntervalMs, maxHandlerMs }
+// 其中 lastIntervalMs 是合成器事件间隔（定位合成器侧），maxHandlerMs 是单次
+// invoke 全往返耗时（含后端 IPC 延迟，定位 IPC 侧）。两者分开读才能回答 T3。
+const mouseProbe = {
+  moves: 0, ipcCalls: 0, ipcErrors: 0, coalesced: 0,
+  lastTs: 0, lastIntervalMs: 0, maxHandlerMs: 0, lastX: -1, lastY: -1,
+};
+// 节流开关默认关闭（0=关闭）。真机 A/B 时在控制台执行
+// `__vcMouseThrottle(16)` 即开 16ms 合并，再执行 `__vcMouseThrottle(0)` 关。
+// 不做自适应节流：瓶颈未定位前加节流只会让操作变钝（见 02/T3）。
+let mouseThrottleMs = 0;
+
 if (typeof window !== "undefined") {
   window.__vcInputLog = () => inputLog.slice();
   window.__vcInputLogClear = () => { inputLog.length = 0; };
+  window.__vcMouseProbe = () => ({ ...mouseProbe, throttleMs: mouseThrottleMs });
+  window.__vcMouseProbeClear = () => {
+    mouseProbe.moves = 0; mouseProbe.ipcCalls = 0; mouseProbe.ipcErrors = 0;
+    mouseProbe.coalesced = 0; mouseProbe.lastIntervalMs = 0; mouseProbe.maxHandlerMs = 0;
+  };
+  window.__vcMouseThrottle = (ms) => { mouseThrottleMs = Math.max(0, Number(ms) || 0); return mouseThrottleMs; };
 }
 function record(entry) {
   inputLog.push(entry);
@@ -179,8 +198,30 @@ export function useInputForward(canvasRef, activeRef) {
     // 「首次可见」闸门 —— 指针不动这件事必须能被用户看到
     const onMove = (e) => {
       if (!activeRef.current || hidMouseEnabled) return;
+      const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+      mouseProbe.moves++;
+      if (mouseProbe.lastTs) mouseProbe.lastIntervalMs = t0 - mouseProbe.lastTs;
+      mouseProbe.lastTs = t0;
       const { x, y } = mapToGuest(canvas, e.clientX, e.clientY);
-      invoke("capture_mouse_move", { x, y }).catch((err) => reportFail("指针", err));
+      // 可选节流（默认关闭）：同点或窗口期内重复事件只记 coalesced，不发 IPC
+      if (mouseThrottleMs > 0 && x === mouseProbe.lastX && y === mouseProbe.lastY) {
+        mouseProbe.coalesced++;
+        return;
+      }
+      if (mouseThrottleMs > 0 && mouseProbe.lastIntervalMs && mouseProbe.lastIntervalMs < mouseThrottleMs) {
+        mouseProbe.coalesced++;
+        return;
+      }
+      mouseProbe.lastX = x; mouseProbe.lastY = y;
+      mouseProbe.ipcCalls++;
+      invoke("capture_mouse_move", { x, y })
+        .catch((err) => { mouseProbe.ipcErrors++; reportFail("指针", err); })
+        .finally(() => {
+          if (t0) {
+            const dt = performance.now() - t0;
+            if (dt > mouseProbe.maxHandlerMs) mouseProbe.maxHandlerMs = dt;
+          }
+        });
     };
     // 未知键**丢弃**，不再 `?? 0`。原先的兜底把任何认不出的 button 变成左键：
     // 五键鼠标按侧键会在 guest 里点一下，比没反应更糟（点到什么全看指针位置）。

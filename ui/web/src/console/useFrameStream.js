@@ -70,6 +70,17 @@ export function drawDirtyFrame(x, y, w, h, b64, paint = true) {
   if (paint) paintCurrent();
 }
 
+// T3 测量探针：帧侧分段计时（IPC 字节 + 解码绘制耗时），只记录不改行为。
+// __vcFrameProbe() → { received, painted, bytes, maxDrawMs, droppedFull }
+const frameProbe = { received: 0, painted: 0, bytes: 0, maxDrawMs: 0, droppedFull: 0 };
+if (typeof window !== "undefined") {
+  window.__vcFrameProbe = () => ({ ...frameProbe, w: buf.w, h: buf.h });
+  window.__vcFrameProbeClear = () => {
+    frameProbe.received = 0; frameProbe.painted = 0; frameProbe.bytes = 0;
+    frameProbe.maxDrawMs = 0; frameProbe.droppedFull = 0;
+  };
+}
+
 export function useFrameStream(canvasRef) {
   useEffect(() => {
     target = canvasRef.current;
@@ -84,6 +95,7 @@ export function useFrameStream(canvasRef) {
 
     const flush = () => {
       scheduled = false;
+      const t0 = performance.now();
       if (pendingFull) {
         const p = pendingFull;
         pendingFull = null;
@@ -91,6 +103,7 @@ export function useFrameStream(canvasRef) {
         drawFrame(p.width, p.height, p.data, false);
         paintCurrent();
         painted++;
+        frameProbe.painted++;
       } else if (pendingDirty.length) {
         const updates = pendingDirty;
         pendingDirty = [];
@@ -104,7 +117,10 @@ export function useFrameStream(canvasRef) {
         }, { x: updates[0].x, y: updates[0].y, w: updates[0].width, h: updates[0].height });
         paintCurrent(rect);
         painted++;
+        frameProbe.painted++;
       }
+      const dt = performance.now() - t0;
+      if (dt > frameProbe.maxDrawMs) frameProbe.maxDrawMs = dt;
       const now = performance.now();
       if (now - statsAt >= 1000) {
         window.__vcDebug = {
@@ -114,7 +130,7 @@ export function useFrameStream(canvasRef) {
           frameWidth: buf.w,
           frameHeight: buf.h,
         };
-        console.info(`[vm-frame] received=${received}/s painted=${painted}/s size=${buf.w}x${buf.h}`);
+        console.info(`[vm-frame] received=${received}/s painted=${painted}/s size=${buf.w}x${buf.h} maxDraw=${frameProbe.maxDrawMs.toFixed(1)}ms`);
         received = 0;
         painted = 0;
         statsAt = now;
@@ -129,10 +145,13 @@ export function useFrameStream(canvasRef) {
     listen("vm-frame", (ev) => {
       const p = ev.payload;
       received++;
+      frameProbe.received++;
+      frameProbe.bytes += (p.data ? p.data.length : 0);
       if (p.type === "dirty") {
         if (!pendingFull) pendingDirty.push(p);
       } else {
         // 全帧只保留最新的一帧；旧帧解码和 Canvas 提交都直接跳过。
+        if (pendingFull) frameProbe.droppedFull++;
         pendingFull = p;
       }
       schedule();

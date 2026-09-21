@@ -18,11 +18,16 @@ export default function Media() {
   const [label, setLabel] = useState(null);   // 已打开的窗口 label，null=未开
   const live = useRef({ label });
   live.current = { label };
-  // 测试态不自动弹窗；自动打开每次激活只做一次，避免重复开窗
+  // 测试态不自动弹窗。testChecked 消除竞态：test_mode 回包前的首次激活
+  // 不得自动 open，否则 E2E 首进影视会弹真窗口（套件 M 曾靠时序偶发通过）。
   const isTest = useRef(false);
+  const testChecked = useRef(false);
 
   useEffect(() => {
-    invoke("test_mode").then((t) => { isTest.current = !!t; }).catch(() => {});
+    invoke("test_mode")
+      .then((t) => { isTest.current = !!t; })
+      .catch(() => {})
+      .finally(() => { testChecked.current = true; });
     window.__vcMedia = () => ({ url: SITE.url, open: !!live.current.label });
   }, []);
 
@@ -70,7 +75,8 @@ export default function Media() {
       setCrumb("影视");
       setHint("Enter 打开 · 退格关闭窗口 · Ctrl+Alt+Q 退出网页");
       setIdx(0);
-      if (!isTest.current && !live.current.label) open();  // kiosk：切过来即出画面
+      // kiosk：切过来即出画面。必须等 test_mode 回包（testChecked），否则测试态首进会误弹真窗口
+      if (testChecked.current && !isTest.current && !live.current.label) open();
     },
     onKey: (e) => {
       if (e.key === "ArrowRight" || e.key === "ArrowLeft") {

@@ -32,6 +32,8 @@ pub struct VmDetail {
     pub disk: String,
     pub vga: String,
     pub mode: String,
+    /// 进入控制台时是否应先起 dbus 采集（仅模式 2 true）。前端按此自动选路，不再让人手选 console/dbus。
+    pub capture_dbus: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -244,6 +246,7 @@ impl PveClient {
             .map(|o| o.keys().any(|k| k.starts_with("hostpci")))
             .unwrap_or(false);
         let mode = mode_label(&vga, has_hostpci);
+        let capture_dbus = should_capture(&vga, has_hostpci);
         Ok(VmDetail {
             vmid,
             name: c["name"].as_str().unwrap_or("").to_string(),
@@ -256,6 +259,7 @@ impl PveClient {
             disk,
             vga,
             mode,
+            capture_dbus,
         })
     }
 
@@ -620,10 +624,25 @@ impl PveClient {
             // 忠实复刻真实 PVE：/config 才是配置；裸 /qemu/{vmid} 是子目录列表
             let after = path.split("/qemu/").nth(1).unwrap_or("");
             if after.ends_with("/config") {
+                // 三模 mock：按 vmid 返回不同显卡配置，供开发机验证自动适配
+                // 9000=virtio（模式 2），100=std（模式 1），200=virtio+直通（模式 3）
+                let vmid: u32 = after
+                    .split('/')
+                    .next()
+                    .unwrap_or("")
+                    .parse()
+                    .unwrap_or(9000);
+                let (vga, extra) = match vmid {
+                    100 => ("std", json!({})),
+                    200 => ("virtio", json!({"hostpci0": "0000:01:00"})),
+                    _ => ("virtio", json!({})),
+                };
                 // memory 用字符串模拟真实 PVE 行为
-                return Ok(
-                    json!({"data":{"name":"Ubuntu 桌面","cores":4,"memory":"8192","vga":"virtio","virtio0":"local-lvm:vm-9000-disk-0,size=32G"}}),
-                );
+                let mut data = json!({"name":"Ubuntu 桌面","cores":4,"memory":"8192","vga":vga,"virtio0":"local-lvm:vm-9000-disk-0,size=32G"});
+                for (k, v) in extra.as_object().unwrap() {
+                    data[k] = v.clone();
+                }
+                return Ok(json!({"data": data}));
             }
             if !after.contains('/') {
                 return Ok(json!({"data":[{"subdir":"config"},{"subdir":"status"}]}));
@@ -643,6 +662,13 @@ fn mode_label(vga: &str, has_hostpci: bool) -> String {
     } else {
         "模式 1 · QMP 办公".to_string()
     }
+}
+
+/// 进入控制台时是否应先起 dbus 采集：仅模式 2 为 true。
+/// 模式 1 走 QMP 回退，模式 3（直通）暂无采集，都不应先起 capture。
+/// 与前端 `Overview.jsx` 的 `includes("模式 2")` 同源，后端单测钉住它。
+pub fn should_capture(vga: &str, has_hostpci: bool) -> bool {
+    !has_hostpci && vga.starts_with("virtio")
 }
 
 /// 兼容数字或字符串的数字解析（PVE 部分字段返回字符串数字）。
@@ -705,6 +731,37 @@ mod tests {
         assert_eq!(mode_label("qxl", true), "模式 3 · 直通满血（V3.0）");
         // 直通优先于 vga
         assert_eq!(mode_label("virtio", true), "模式 3 · 直通满血（V3.0）");
+        // 空 vga 回退模式 1（QMP），不崩
+        assert_eq!(mode_label("", false), "模式 1 · QMP 办公");
+    }
+
+    #[test]
+    fn vm_detail_serializes_capture_dbus() {
+        // IPC 契约：前端按 capture_dbus 自动选路，字段缺失会回退到文案判断。序列化必须带上它。
+        let d = VmDetail {
+            vmid: 9000,
+            name: "t".into(),
+            status: "running".into(),
+            cores: 4,
+            memory: 8192,
+            disk: "32G".into(),
+            vga: "virtio".into(),
+            mode: "模式 2 · 像素流 60fps（V2.0）".into(),
+            capture_dbus: true,
+        };
+        let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["capture_dbus"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn should_capture_only_mode2() {
+        assert!(should_capture("virtio", false));
+        assert!(should_capture("virtio-gl", false));
+        assert!(!should_capture("std", false));
+        assert!(!should_capture("", false));
+        // 直通优先：即使 virtio 也不起 dbus 采集
+        assert!(!should_capture("virtio", true));
+        assert!(!should_capture("std", true));
     }
 
     #[tokio::test]
@@ -719,6 +776,21 @@ mod tests {
         assert!(d.disk.contains("32G"));
         assert_eq!(d.status, "running");
         assert!(d.mode.contains("模式 2"));
+        assert!(d.capture_dbus);
+    }
+
+    #[tokio::test]
+    async fn mock_detail_covers_three_modes() {
+        let c = mock_client();
+        let m1 = c.vm_detail(100).await.unwrap();
+        assert!(m1.mode.contains("模式 1"), "vmid 100 应为模式 1，实得 {}", m1.mode);
+        assert!(!m1.capture_dbus);
+        let m2 = c.vm_detail(9000).await.unwrap();
+        assert!(m2.mode.contains("模式 2"));
+        assert!(m2.capture_dbus);
+        let m3 = c.vm_detail(200).await.unwrap();
+        assert!(m3.mode.contains("模式 3"), "vmid 200 应为模式 3，实得 {}", m3.mode);
+        assert!(!m3.capture_dbus);
     }
 
     #[tokio::test]

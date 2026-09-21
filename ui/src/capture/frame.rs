@@ -149,7 +149,13 @@ pub fn push_frame(
 
     match state {
         DirtyState::Full => {
+            // T3 分段计时：base64 编码耗时。超 16ms 即吃掉一帧预算，真机看此行定位。
+            let t0 = std::time::Instant::now();
             let b64 = B64.encode(&f.rgb);
+            let dt = t0.elapsed();
+            if dt.as_millis() > 16 {
+                eprintln!("[capture] full-frame encode slow: {}x{} {}KiB b64 in {dt:?}", f.width, f.height, b64.len() / 1024);
+            }
             let _ = app.emit(
                 "vm-frame",
                 json!({ "type": "full", "width": f.width, "height": f.height, "data": b64 }),
@@ -160,7 +166,12 @@ pub fn push_frame(
             if let Some(rgb) = crop_rgb(f, x, y, w, h) {
                 let raw_len = rgb.len();
                 // 裁剪脏区域 RGB，只推变化部分（大幅省带宽）
+                let t0 = std::time::Instant::now();
                 let b64 = B64.encode(&rgb);
+                let dt = t0.elapsed();
+                if dt.as_millis() > 16 {
+                    eprintln!("[capture] dirty encode slow: {w}x{h} {}KiB b64 in {dt:?}", b64.len() / 1024);
+                }
                 let _ = app.emit(
                     "vm-frame",
                     json!({ "type": "dirty", "x": x, "y": y, "width": w, "height": h, "data": b64 }),

@@ -1,5 +1,7 @@
 /** 概览子视图。测试契约：`.info-grid` 文本含 "CPU"/"内存"（C9）、
  *  VM 侧含 "模式 2" 且有 `#vm-enter-capture` 按钮（C9b）。
+ *  三模自动适配：按钮按 `detail.capture_dbus`（缺字段回退 mode 文案）选路，
+ *  模式 1 显示 QMP 入口，模式 3 不显示按钮（contentLen 同步为 0）。
  */
 import { fmtBytes, fmtPct } from "../../lib/format.js";
 
@@ -33,8 +35,10 @@ export function VmOverview({ detail, focused, onEnterCapture }) {
       </div>
     );
   }
-  // 模式 2（virtio）可实际进入采集；模式 1/3 仅状态展示
-  const isMode2 = !!detail.mode?.includes("模式 2");
+  // 三模自动适配：capture_dbus 为后端策略，缺字段回退 mode 文案
+  const wantCapture = detail.capture_dbus ?? detail.mode?.includes("模式 2") ?? false;
+  const isMode1 = !!detail.mode?.includes("模式 1");
+  const showEntry = wantCapture || isMode1;
   return (
     <div className="info-grid">
       <Cell k="CPU 核心" v={`${detail.cores} 核`} />
@@ -45,14 +49,15 @@ export function VmOverview({ detail, focused, onEnterCapture }) {
         <div className="k">采集模式</div>
         <div className="v accent">
           {detail.mode}
-          {isMode2 && (
+          {showEntry && (
             <button
               type="button"
               id="vm-enter-capture"
+              data-capture={wantCapture ? "dbus" : "qmp"}
               className={"btn btn-ghost inline-btn" + (focused ? " focused" : "")}
-              onClick={onEnterCapture}
+              onClick={() => onEnterCapture(detail)}
             >
-              进入采集
+              {wantCapture ? "进入采集" : "进入控制台"}
             </button>
           )}
         </div>

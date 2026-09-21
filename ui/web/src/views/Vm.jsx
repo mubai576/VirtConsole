@@ -72,8 +72,12 @@ export default function Vm({ consoleRef }) {
     if (s.sub === 1) return monCards.current.length;
     if (s.entity.kind === "host") return s.sub === 2 ? 1 : 0;   // 终端整体算一项
     if (s.sub === 2) return OPS.length + s.snapshots.length;
-    // VM 概览：模式 2 才有"进入采集"按钮
-    return s.sub === 0 && s.detail?.mode?.includes("模式 2") ? 1 : 0;
+    // VM 概览：模式 1（QMP 控制台）与模式 2（采集）都有进入按钮；模式 3 暂无
+    // capture_dbus 为后端自动适配结果，缺字段时回退到 mode 文案判断
+    const d = s.detail;
+    const hasConsole = d?.capture_dbus ?? d?.mode?.includes("模式 2") ?? false;
+    const hasQmp = d?.mode?.includes("模式 1") ?? false;
+    return s.sub === 0 && (hasConsole || hasQmp) ? 1 : 0;
   }
 
   /* ===== 数据 ===== */
@@ -206,12 +210,29 @@ export default function Vm({ consoleRef }) {
   }, [termActive]);
 
   /* ===== 动作 ===== */
-  const enterCapture = useCallback(async () => {
+  // 三模自动适配：按 VmDetail.capture_dbus（缺字段回退 mode 文案）决定进哪条路。
+  // 注意双语义（故意保留现状，不在此次改动里统一，进层统一留到 T4 重构）：
+  // 模式 2 只起 dbus 采集不进层（历史行为：用户再经 Ops 进控制台）；
+  // 模式 1 直接进层（键盘走 QMP 回退）；模式 3 暂无采集，给提示不进层。
+  const enterCapture = useCallback(async (detail) => {
+    const d = detail ?? live.current.detail;
+    const wantCapture = d?.capture_dbus ?? d?.mode?.includes("模式 2") ?? false;
+    const isMode1 = d?.mode?.includes("模式 1") ?? false;
+    const e = live.current.entity;
+    if (!wantCapture && !isMode1) {
+      toast("该 VM 为直通模式，暂无采集链路（V3.0 满血版）");
+      return;
+    }
+    if (!wantCapture && isMode1) {
+      if (e?.vmid == null) { toast("未选中 VM"); return; }
+      await consoleRef.current?.enter(e.vmid);
+      return;
+    }
     try {
       await invoke("capture_start", { busAddr: null });
       toast("dbus 采集已启动");
-    } catch (e) {
-      toast("采集启动失败: " + e + "（VM 需以 -display dbus 启动）");
+    } catch (err) {
+      toast("采集启动失败: " + err + "（VM 需以 -display dbus 启动）");
     }
   }, []);
 
